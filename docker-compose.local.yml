@@ -1,0 +1,40 @@
+name: cognita-campaign-engine-local
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: campaign-local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: campaign_engine
+      POSTGRES_USER: campaign_engine
+      POSTGRES_PASSWORD: campaign_engine
+    ports:
+      - "5432:5432"
+    volumes:
+      - campaign_local_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campaign_engine -d campaign_engine"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: campaign-local-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - campaign_local_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  campaign_local_postgres:
+  campaign_local_redis:
+

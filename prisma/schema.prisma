@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum CampaignStatus {
+  draft
+  reviewed
+  templates_ready
+  templates_submitted
+  templates_approved
+  scheduled
+  running
+  paused
+  completed
+  failed
+}
+
+enum ConsentStatus {
+  unknown
+  group_member_discovered
+  consent_request_candidate
+  opt_in_requested
+  opted_in
+  opt_out
+  expired
+  blocked
+}
+
+enum SendAttemptStatus {
+  queued
+  blocked
+  running
+  sent
+  delivered
+  read
+  failed
+  cancelled
+}
+
+enum Channel {
+  uazapi_group
+  kapso_official
+  capsule_official
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  status      CampaignStatus @default(draft)
+  timezone    String         @default("America/Sao_Paulo")
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  versions    CampaignVersion[]
+  sendAttempts SendAttempt[]
+}
+
+model CampaignVersion {
+  id             String   @id @default(cuid())
+  campaignId     String
+  version        Int
+  workflowJson   Json
+  approvedAt     DateTime?
+  createdAt      DateTime @default(now())
+
+  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, version])
+}
+
+model Contact {
+  id          String   @id @default(cuid())
+  phoneE164   String   @unique
+  displayName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  consents     ContactConsent[]
+  sendAttempts SendAttempt[]
+}
+
+model ContactConsent {
+  id                       String        @id @default(cuid())
+  contactId                String
+  phoneE164                String
+  status                   ConsentStatus @default(unknown)
+  source                   String
+  sourceGroupJid           String?
+  sourceGroupName          String?
+  requestedAt              DateTime?
+  confirmedAt              DateTime?
+  declinedAt               DateTime?
+  expiredAt                DateTime?
+  requestTemplateId        String?
+  requestProviderMessageId String?
+  confirmationEventId      String?
+  proofPayloadJson         Json?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  contact                  Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([phoneE164])
+  @@index([status])
+  @@index([sourceGroupJid])
+}
+
+model GroupTarget {
+  id                  String   @id @default(cuid())
+  name                String
+  provider            String   @default("uazapi")
+  remoteJid           String   @unique
+  allowlisted         Boolean  @default(false)
+  ownerCanSendMessage Boolean  @default(false)
+  instanceConnected   Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  extractions         GroupContactExtraction[]
+  sendAttempts        SendAttempt[]
+}
+
+model GroupContactExtraction {
+  id          String   @id @default(cuid())
+  groupId     String
+  contactId   String?
+  remoteJid   String?
+  phoneE164   String
+  rawPayload   Json?
+  extractedAt DateTime @default(now())
+
+  group       GroupTarget @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, phoneE164])
+  @@index([phoneE164])
+}
+
+model TemplateVersion {
+  id                 String   @id @default(cuid())
+  key                String
+  provider           String
+  providerTemplateId String?
+  language           String   @default("pt_BR")
+  category           String?
+  status             String   @default("draft")
+  body               String
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([provider, key, language])
+}
+
+model SendAttempt {
+  id                  String            @id @default(cuid())
+  idempotencyKey       String            @unique
+  campaignId           String?
+  workflowStepId       String?
+  channel              Channel
+  provider             String
+  recipientType        String
+  recipientId          String
+  contactId            String?
+  groupId              String?
+  scheduledAt          DateTime
+  startedAt            DateTime?
+  completedAt          DateTime?
+  status               SendAttemptStatus @default(queued)
+  providerMessageId    String?
+  renderedText         String?
+  requestPayloadJson   Json?
+  responsePayloadJson  Json?
+  errorCode            String?
+  errorMessage         String?
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  campaign             Campaign?         @relation(fields: [campaignId], references: [id])
+  contact              Contact?          @relation(fields: [contactId], references: [id])
+  group                GroupTarget?      @relation(fields: [groupId], references: [id])
+  events               MessageEvent[]
+
+  @@index([campaignId])
+  @@index([providerMessageId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+model MessageEvent {
+  id             String   @id @default(cuid())
+  sendAttemptId  String?
+  provider       String
+  eventType      String
+  providerMessageId String?
+  rawPayloadJson Json
+  occurredAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  sendAttempt    SendAttempt? @relation(fields: [sendAttemptId], references: [id])
+
+  @@index([providerMessageId])
+  @@index([eventType])
+}
+
+model UserAudioInstruction {
+  id                 String   @id @default(cuid())
+  campaignId          String?
+  originalFileUrl     String
+  durationMs          Int?
+  detectedLanguage    String?
+  rawTranscript       String?
+  reviewedTranscript  String?
+  confidence          Float?
+  contentClass        String?
+  status              String   @default("uploaded")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model WebhookEvent {
+  id            String   @id @default(cuid())
+  provider      String
+  eventType     String
+  signatureValid Boolean @default(false)
+  rawPayloadJson Json
+  processedAt   DateTime?
+  createdAt     DateTime @default(now())
+
+  @@index([provider])
+  @@index([eventType])
+}
+

@@ -1,6 +1,7 @@
 .DS_Store
 node_modules/
 .next/
+.turbo/
 dist/
 build/
 coverage/
@@ -9,6 +10,6 @@ coverage/
 !.env.example
 !.env.production.example
 *.log
+*.tsbuildinfo
 tmp/
 work/
-
