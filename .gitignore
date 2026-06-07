@@ -1,0 +1,14 @@
+.DS_Store
+node_modules/
+.next/
+dist/
+build/
+coverage/
+.env
+.env.*
+!.env.example
+!.env.production.example
+*.log
+tmp/
+work/
+
