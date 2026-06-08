@@ -48,29 +48,134 @@ enum Channel {
   capsule_official
 }
 
-model Campaign {
-  id          String         @id @default(cuid())
-  name        String
-  status      CampaignStatus @default(draft)
-  timezone    String         @default("America/Sao_Paulo")
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+enum ScheduledJobStatus {
+  queued
+  running
+  done
+  failed
+  cancelled
+  blocked
+  retrying
+}
 
-  versions    CampaignVersion[]
-  sendAttempts SendAttempt[]
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+  revoked
+  expired
+}
+
+enum ApprovalAction {
+  submit_campaign
+  review_workflow
+  approve_workflow
+  submit_template
+  approve_template
+  start_campaign
+  pause_campaign
+  resume_campaign
+  cancel_campaign
+}
+
+enum EnrollmentStatus {
+  candidate
+  invited
+  opted_in
+  opted_out
+  blocked
+  expired
+}
+
+model Campaign {
+  id        String         @id @default(cuid())
+  name      String
+  status    CampaignStatus @default(draft)
+  timezone  String         @default("America/Sao_Paulo")
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  versions            CampaignVersion[]
+  workflowDefinitions WorkflowDefinition[]
+  sendAttempts        SendAttempt[]
+  scheduledJobs       ScheduledJob[]
+  approvals           Approval[]
+  enrollments         Enrollment[]
+  channelAccounts     CampaignChannelAccount[]
+  optOuts             OptOut[]
 }
 
 model CampaignVersion {
-  id             String   @id @default(cuid())
-  campaignId     String
-  version        Int
-  workflowJson   Json
-  approvedAt     DateTime?
-  createdAt      DateTime @default(now())
+  id           String    @id @default(cuid())
+  campaignId   String
+  version      Int
+  workflowJson Json
+  approvedAt   DateTime?
+  createdAt    DateTime  @default(now())
 
-  campaign       Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
 
   @@unique([campaignId, version])
+}
+
+model CampaignChannelAccount {
+  campaignId       String
+  channelAccountId String
+  enabled          Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  campaign       Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount @relation(fields: [channelAccountId], references: [id], onDelete: Cascade)
+
+  @@id([campaignId, channelAccountId])
+}
+
+model WorkflowDefinition {
+  id          String   @id @default(cuid())
+  campaignId  String
+  workflowKey String?
+  version     Int
+  name        String?
+  timezone    String   @default("America/Sao_Paulo")
+  entry       String
+  nodes       Json
+  edges       Json
+  source      String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  campaign Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  steps    WorkflowStep[]
+
+  @@unique([campaignId, version])
+}
+
+model WorkflowStep {
+  id                   String    @id @default(cuid())
+  workflowDefinitionId String
+  stepKey              String
+  stepType             String
+  channel              Channel?
+  templateKey          String?
+  messageKey           String?
+  groupKey             String?
+  at                   DateTime?
+  durationMs           Int?
+  parameters           Json?
+  sourceHint           String?
+  displayName          String?
+  isTerminal           Boolean   @default(false)
+  sortIndex            Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  workflowDefinition WorkflowDefinition @relation(fields: [workflowDefinitionId], references: [id], onDelete: Cascade)
+  scheduledJobs      ScheduledJob[]
+  sendAttempts       SendAttempt[]
+
+  @@unique([workflowDefinitionId, stepKey])
+  @@index([workflowDefinitionId])
 }
 
 model Contact {
@@ -82,6 +187,8 @@ model Contact {
 
   consents     ContactConsent[]
   sendAttempts SendAttempt[]
+  enrollments  Enrollment[]
+  optOuts      OptOut[]
 }
 
 model ContactConsent {
@@ -103,11 +210,12 @@ model ContactConsent {
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
-  contact                  Contact       @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([phoneE164])
   @@index([status])
   @@index([sourceGroupJid])
+  @@index([contactId, status])
 }
 
 model GroupTarget {
@@ -121,8 +229,10 @@ model GroupTarget {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
-  extractions         GroupContactExtraction[]
-  sendAttempts        SendAttempt[]
+  extractions   GroupContactExtraction[]
+  sendAttempts  SendAttempt[]
+  enrollments   Enrollment[]
+  scheduledJobs ScheduledJob[]
 }
 
 model GroupContactExtraction {
@@ -131,106 +241,256 @@ model GroupContactExtraction {
   contactId   String?
   remoteJid   String?
   phoneE164   String
-  rawPayload   Json?
+  rawPayload  Json?
   extractedAt DateTime @default(now())
 
-  group       GroupTarget @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  group GroupTarget @relation(fields: [groupId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, phoneE164])
   @@index([phoneE164])
 }
 
+model ChannelAccount {
+  id                String   @id @default(cuid())
+  provider          String
+  providerAccountId String
+  label             String?
+  phoneE164         String?
+  active            Boolean  @default(true)
+  metadata          Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  sendAttempts  SendAttempt[]
+  scheduledJobs ScheduledJob[]
+  webhookEvents WebhookEvent[]
+  approvals     Approval[]
+  campaigns     CampaignChannelAccount[]
+
+  @@unique([provider, providerAccountId])
+  @@index([provider, providerAccountId])
+}
+
 model TemplateVersion {
-  id                 String   @id @default(cuid())
+  id                 String     @id @default(cuid())
   key                String
   provider           String
   providerTemplateId String?
-  language           String   @default("pt_BR")
+  language           String     @default("pt_BR")
   category           String?
-  status             String   @default("draft")
+  status             String     @default("draft")
   body               String
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  approvals          Approval[]
 
   @@unique([provider, key, language])
 }
 
 model SendAttempt {
   id                  String            @id @default(cuid())
-  idempotencyKey       String            @unique
-  campaignId           String?
-  workflowStepId       String?
-  channel              Channel
-  provider             String
-  recipientType        String
-  recipientId          String
-  contactId            String?
-  groupId              String?
-  scheduledAt          DateTime
-  startedAt            DateTime?
-  completedAt          DateTime?
-  status               SendAttemptStatus @default(queued)
-  providerMessageId    String?
-  renderedText         String?
-  requestPayloadJson   Json?
-  responsePayloadJson  Json?
-  errorCode            String?
-  errorMessage         String?
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
+  idempotencyKey      String            @unique
+  campaignId          String?
+  workflowStepId      String?
+  channel             Channel
+  provider            String
+  recipientType       String
+  recipientId         String
+  contactId           String?
+  groupId             String?
+  channelAccountId    String?
+  scheduledJobId      String?
+  consentStatus       ConsentStatus?
+  templateKey         String?
+  consentStatusReason String?
+  scheduledAt         DateTime
+  startedAt           DateTime?
+  completedAt         DateTime?
+  status              SendAttemptStatus @default(queued)
+  providerMessageId   String?
+  renderedText        String?
+  requestPayloadJson  Json?
+  responsePayloadJson Json?
+  errorCode           String?
+  errorMessage        String?
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
-  campaign             Campaign?         @relation(fields: [campaignId], references: [id])
-  contact              Contact?          @relation(fields: [contactId], references: [id])
-  group                GroupTarget?      @relation(fields: [groupId], references: [id])
-  events               MessageEvent[]
+  campaign       Campaign?       @relation(fields: [campaignId], references: [id])
+  contact        Contact?        @relation(fields: [contactId], references: [id])
+  group          GroupTarget?    @relation(fields: [groupId], references: [id])
+  channelAccount ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  workflowStep   WorkflowStep?   @relation(fields: [workflowStepId], references: [id], onDelete: SetNull)
+  scheduledJob   ScheduledJob?   @relation(fields: [scheduledJobId], references: [id], onDelete: SetNull)
+  events         MessageEvent[]
 
   @@index([campaignId])
   @@index([providerMessageId])
   @@index([status])
   @@index([scheduledAt])
+  @@index([channelAccountId])
+  @@index([workflowStepId])
 }
 
 model MessageEvent {
-  id             String   @id @default(cuid())
-  sendAttemptId  String?
-  provider       String
-  eventType      String
+  id                String   @id @default(cuid())
+  sendAttemptId     String?
+  provider          String
+  eventType         String
   providerMessageId String?
-  rawPayloadJson Json
-  occurredAt     DateTime @default(now())
-  createdAt      DateTime @default(now())
+  rawPayloadJson    Json
+  occurredAt        DateTime @default(now())
+  createdAt         DateTime @default(now())
+  webhookEventId    String?
 
-  sendAttempt    SendAttempt? @relation(fields: [sendAttemptId], references: [id])
+  sendAttempt  SendAttempt?  @relation(fields: [sendAttemptId], references: [id], onDelete: SetNull)
+  webhookEvent WebhookEvent? @relation(fields: [webhookEventId], references: [id], onDelete: SetNull)
 
   @@index([providerMessageId])
   @@index([eventType])
 }
 
+model ScheduledJob {
+  id               String             @id @default(cuid())
+  campaignId       String
+  workflowStepId   String
+  channel          Channel
+  runAt            DateTime
+  status           ScheduledJobStatus @default(queued)
+  idempotencyKey   String             @unique
+  payloadJson      Json?
+  errorCode        String?
+  errorMessage     String?
+  attemptCount     Int                @default(0)
+  maxAttempts      Int                @default(4)
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  channelAccountId String?
+
+  campaign       Campaign        @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  workflowStep   WorkflowStep    @relation(fields: [workflowStepId], references: [id], onDelete: Cascade)
+  channelAccount ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  sendAttempts   SendAttempt[]
+  groupTarget    GroupTarget?    @relation(fields: [groupTargetId], references: [id])
+  groupTargetId  String?
+
+  @@index([campaignId])
+  @@index([status])
+  @@index([runAt])
+  @@index([channelAccountId])
+}
+
 model UserAudioInstruction {
   id                 String   @id @default(cuid())
-  campaignId          String?
-  originalFileUrl     String
-  durationMs          Int?
-  detectedLanguage    String?
-  rawTranscript       String?
-  reviewedTranscript  String?
-  confidence          Float?
-  contentClass        String?
-  status              String   @default("uploaded")
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  campaignId         String?
+  originalFileUrl    String
+  durationMs         Int?
+  detectedLanguage   String?
+  rawTranscript      String?
+  reviewedTranscript String?
+  confidence         Float?
+  contentClass       String?
+  status             String   @default("uploaded")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model Approval {
+  id          String         @id @default(cuid())
+  entityType  String
+  entityId    String
+  action      ApprovalAction
+  status      ApprovalStatus @default(pending)
+  requestedBy String?
+  reviewedBy  String?
+  notes       String?
+  decidedAt   DateTime?
+  expiresAt   DateTime?
+  metadata    Json?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  campaignId        String?
+  templateVersionId String?
+  channelAccountId  String?
+
+  campaign        Campaign?        @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  templateVersion TemplateVersion? @relation(fields: [templateVersionId], references: [id], onDelete: SetNull)
+  channelAccount  ChannelAccount?  @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([entityType, entityId])
+}
+
+model Enrollment {
+  id                      String           @id @default(cuid())
+  campaignId              String
+  contactId               String
+  status                  EnrollmentStatus @default(candidate)
+  source                  String?
+  channel                 Channel?
+  sourceGroupJid          String?
+  sourceCampaignVersionId String?
+  consentStatus           ConsentStatus    @default(unknown)
+  reachedLimit            Boolean          @default(false)
+  reason                  String?
+  createdAt               DateTime         @default(now())
+  updatedAt               DateTime         @updatedAt
+
+  campaign      Campaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact       Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  groupTarget   GroupTarget? @relation(fields: [groupTargetId], references: [id])
+  groupTargetId String?
+
+  @@unique([campaignId, contactId])
+  @@index([status])
+}
+
+model OptOut {
+  id             String    @id @default(cuid())
+  phoneE164      String
+  campaignId     String?
+  contactId      String?
+  reason         String?
+  channel        Channel?
+  rawPayloadJson Json?
+  source         String?
+  validUntil     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  contact  Contact?  @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  @@index([phoneE164])
+  @@index([campaignId])
 }
 
 model WebhookEvent {
-  id            String   @id @default(cuid())
-  provider      String
-  eventType     String
-  signatureValid Boolean @default(false)
-  rawPayloadJson Json
-  processedAt   DateTime?
-  createdAt     DateTime @default(now())
+  id                String    @id @default(cuid())
+  provider          String
+  eventType         String
+  signatureValid    Boolean   @default(false)
+  rawPayloadJson    Json
+  processedAt       DateTime?
+  providerMessageId String?
+  signature         String?
+  requestId         String?
+  dedupKey          String?
+  receivedAt        DateTime  @default(now())
+  processed         Boolean   @default(false)
+  channelAccountId  String?
+  errorCode         String?
+  errorMessage      String?
+  createdAt         DateTime  @default(now())
+
+  channelAccount ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+  messageEvents  MessageEvent[]
 
   @@index([provider])
   @@index([eventType])
+  @@index([providerMessageId])
+  @@index([dedupKey])
+  @@index([processedAt])
+  @@index([processed])
 }
-

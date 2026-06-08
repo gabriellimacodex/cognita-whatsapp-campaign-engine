@@ -63,5 +63,38 @@ describe("evaluateSendRisk", () => {
     expect(result.decision).toBe("block");
     expect(result.reasons).toContain("group_not_allowlisted");
   });
-});
 
+  it("blocks when kill switch is active", () => {
+    const result = evaluateSendRisk({
+      ...baseContext,
+      killSwitchGlobal: true
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons).toContain("global_kill_switch_active");
+  });
+
+  it("flags consent request candidate that does not use opt-in template", () => {
+    const result = evaluateSendRisk({
+      ...baseContext,
+      consentStatus: "consent_request_candidate",
+      isOfficialBusinessInitiated: true,
+      isCommercialTemplate: false,
+      isOptInRequestTemplate: false
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons).toContain("discovered_contact_only_allows_opt_in_request");
+  });
+
+  it("requires campaign status ready for official execution", () => {
+    const result = evaluateSendRisk({
+      ...baseContext,
+      campaignApproved: true,
+      campaignStatus: "draft"
+    });
+
+    expect(result.decision).toBe("block");
+    expect(result.reasons).toContain("campaign_status_draft_not_ready");
+  });
+});

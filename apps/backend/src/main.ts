@@ -2,8 +2,11 @@ import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
 import { FastifyAdapter, NestFastifyApplication } from "@nestjs/platform-fastify";
 import { AppModule } from "./modules/app.module.js";
+import { loadEnv } from "@cognita-campaign/config";
 
 async function bootstrap() {
+  loadEnv();
+
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, new FastifyAdapter(), {
     logger: ["error", "warn", "log"]
   });
@@ -17,4 +20,3 @@ async function bootstrap() {
 }
 
 void bootstrap();
-

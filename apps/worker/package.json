@@ -13,6 +13,7 @@
   "dependencies": {
     "@cognita-campaign/config": "workspace:*",
     "@cognita-campaign/domain": "workspace:*",
+    "@prisma/client": "^6.19.3",
     "bullmq": "^5.34.2"
   },
   "devDependencies": {

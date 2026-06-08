@@ -10,6 +10,28 @@ export type CampaignStatus =
   | "completed"
   | "failed";
 
+export type CampaignLifecycleAction =
+  | "approve"
+  | "submit_templates"
+  | "templates_approved"
+  | "schedule"
+  | "run"
+  | "pause"
+  | "resume"
+  | "complete"
+  | "fail"
+  | "restart";
+
+export type ConsentTransitionAction =
+  | "discover_group_member"
+  | "request_opt_in"
+  | "receive_opt_in_positive"
+  | "receive_opt_in_negative"
+  | "mark_expired"
+  | "block_contact";
+
+export type CampaignHealth = "on_track" | "at_risk" | "blocked";
+
 export type Channel = "uazapi_group" | "kapso_official" | "capsule_official";
 
 export type WorkflowNodeType =
@@ -79,6 +101,29 @@ export interface WorkflowEdge {
   condition?: string;
 }
 
+export interface WorkflowValidationIssue {
+  code:
+    | "MISSING_VERSION"
+    | "MISSING_TIMEZONE"
+    | "MISSING_ENTRY"
+    | "MISSING_NODES"
+    | "MISSING_EDGES"
+    | "INVALID_ENTRY"
+    | "INVALID_NODE"
+    | "DUPLICATE_NODE_ID"
+    | "MISSING_NODE_REFERENCE"
+    | "INVALID_NODE_FIELD"
+    | "MISSING_START_NODE"
+    | "MULTIPLE_START_NODES";
+  message: string;
+  path: string;
+}
+
+export interface WorkflowValidationResult {
+  valid: boolean;
+  issues: WorkflowValidationIssue[];
+}
+
 export interface ContactConsent {
   contactId: string;
   phoneE164: string;
@@ -90,6 +135,57 @@ export interface ContactConsent {
   confirmedAt?: Date;
   declinedAt?: Date;
   expiredAt?: Date;
+}
+
+export interface CampaignPolicy {
+  minimumApprovalForExecution: CampaignStatus[];
+  scheduleWindowHours?: number;
+  timezone: string;
+}
+
+export interface CampaignEntity {
+  id: string;
+  name: string;
+  status: CampaignStatus;
+  timezone: string;
+  health: CampaignHealth;
+  createdAt: Date;
+  updatedAt: Date;
+  policy?: CampaignPolicy;
+}
+
+export interface CampaignVersionEntity {
+  id: string;
+  campaignId: string;
+  version: number;
+  workflowJson: WorkflowDefinition;
+  approvedAt?: Date;
+  createdAt: Date;
+}
+
+export interface TemplateDraft {
+  id: string;
+  campaignId: string;
+  key: string;
+  channel: Channel;
+  templateText: string;
+  category: string;
+  language: string;
+  status: "draft" | "submitted" | "approved" | "rejected" | "archived";
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface ScheduledJob {
+  id: string;
+  campaignId: string;
+  workflowStepId: string;
+  channel: Channel;
+  runAt: Date;
+  status: "queued" | "running" | "done" | "failed" | "cancelled";
+  payload: Record<string, unknown>;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface GroupTarget {
@@ -119,10 +215,34 @@ export interface SendPolicyContext {
   consentStatus?: ConsentStatus;
   groupTarget?: GroupTarget;
   idempotencyAlreadySucceeded?: boolean;
+  campaignStatus?: CampaignStatus;
+  campaignStartAt?: Date;
+  killSwitchGlobal?: boolean;
+  killSwitchChannel?: boolean;
+  riskWindowMinutes?: number;
+  dryRun?: boolean;
+  payloadVersion?: string;
+}
+
+export interface ConsentTransition {
+  from: ConsentStatus;
+  to: ConsentStatus;
+  action: ConsentTransitionAction;
+}
+
+export interface ConsentTransitionContext {
+  action: ConsentTransitionAction;
+  currentStatus: ConsentStatus;
+  metadata?: Record<string, string>;
+}
+
+export interface ConsentTransitionResult {
+  allowed: boolean;
+  to: ConsentStatus;
+  reasons: string[];
 }
 
 export interface RiskEvaluation {
   decision: RiskDecision;
   reasons: string[];
 }
-
