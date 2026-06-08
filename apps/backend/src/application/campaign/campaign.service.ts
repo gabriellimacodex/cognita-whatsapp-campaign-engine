@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   validateWorkflowDefinition,
   type WorkflowDefinition,
@@ -22,9 +22,45 @@ interface CampaignCreateResult {
   workflowValidation: WorkflowValidationResult;
 }
 
+interface CampaignApprovalRecord {
+  id: string;
+  status: string;
+  action: string;
+  metadata: unknown;
+  notes: string | null;
+  reviewedBy: string | null;
+  requestedBy: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface CampaignApprovalResult {
+  action: CampaignApprovalAction;
+  approvalId: string;
+  campaignId: string;
+  campaignStatus: string;
+  status: string;
+}
+
+type ApprovalAction = "submit_campaign" | "review_workflow" | "approve_workflow" | "submit_template" | "approve_template" | "start_campaign" | "pause_campaign" | "resume_campaign" | "cancel_campaign";
+
+type CampaignApprovalAction = Extract<
+  ApprovalAction,
+  "approve_workflow" | "approve_template" | "start_campaign"
+>;
+
 @Injectable()
 export class CampaignService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private readonly allowedStartStatuses = new Set([
+    "templates_approved",
+    "scheduled",
+    "running",
+    "paused",
+    "completed"
+  ]);
 
   private normalizeTimezone(timezone?: string) {
     return timezone?.trim() || "America/Sao_Paulo";
@@ -125,6 +161,113 @@ export class CampaignService {
         }
       }
     });
+  }
+
+  async getCampaignById(campaignId: string) {
+    const campaign = await (this.prisma.db as any).campaign.findUnique({
+      where: { id: campaignId }
+    }) as { id: string; status: string } | null;
+
+    if (!campaign) {
+      throw new NotFoundException("Campaign not found");
+    }
+
+    return campaign;
+  }
+
+  async listCampaignApprovals(campaignId: string): Promise<CampaignApprovalRecord[]> {
+    const records = (await (this.prisma.db as any).approval.findMany({
+      where: {
+        entityType: "campaign",
+        entityId: campaignId
+      },
+      orderBy: { createdAt: "desc" }
+    })) as Array<{
+      id: string;
+      status: string;
+      action: string;
+      metadata: unknown;
+      notes: string | null;
+      reviewedBy: string | null;
+      requestedBy: string | null;
+      decidedAt: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+    }>;
+
+    return records.map((approval) => ({
+      id: approval.id,
+      status: approval.status,
+      action: approval.action,
+      metadata: approval.metadata,
+      notes: approval.notes,
+      reviewedBy: approval.reviewedBy,
+      requestedBy: approval.requestedBy,
+      decidedAt: approval.decidedAt?.toISOString() ?? null,
+      createdAt: approval.createdAt.toISOString(),
+      updatedAt: approval.updatedAt.toISOString()
+    }));
+  }
+
+  async approveCampaignWorkflow(campaignId: string, action: CampaignApprovalAction, reviewer: string = "system"): Promise<CampaignApprovalResult> {
+    const campaign = await this.getCampaignById(campaignId);
+
+    let campaignStatus = campaign.status;
+    if (action === "approve_workflow") {
+      if (campaignStatus !== "reviewed" && campaignStatus !== "templates_approved" && campaignStatus !== "scheduled" && campaignStatus !== "running") {
+        campaignStatus = "reviewed";
+      }
+    } else if (action === "approve_template") {
+      campaignStatus = "templates_approved";
+    } else if (action === "start_campaign" && !this.allowedStartStatuses.has(campaignStatus)) {
+      throw new BadRequestException("Campaign must be in templates_approved or later to approve start");
+    }
+
+    if (campaignStatus !== campaign.status) {
+      await (this.prisma.db as any).campaign.update({
+        where: { id: campaignId },
+        data: { status: campaignStatus }
+      });
+    }
+
+    const approval = await (this.prisma.db as any).approval.create({
+      data: {
+        entityType: "campaign",
+        entityId: campaignId,
+        action,
+        status: "approved",
+        reviewedBy: reviewer,
+        decidedAt: new Date(),
+        metadata: { source: "ui", action },
+        notes: `${action} approved for campaign ${campaignId}`,
+        campaignId
+      },
+      select: {
+        id: true,
+        status: true
+      }
+    }) as { id: string; status: string };
+
+    return {
+      action,
+      approvalId: approval.id,
+      campaignId,
+      campaignStatus,
+      status: approval.status
+    };
+  }
+
+  async assertCampaignStartApproved(campaignId: string): Promise<boolean> {
+    const exists = await (this.prisma.db as any).approval.findFirst({
+      where: {
+        entityType: "campaign",
+        entityId: campaignId,
+        action: "start_campaign",
+        status: "approved"
+      }
+    }) as { id: string } | null;
+
+    return Boolean(exists);
   }
 
   private makeWorkflowSteps(workflow: WorkflowDefinition) {

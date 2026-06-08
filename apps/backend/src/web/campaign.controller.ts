@@ -13,6 +13,16 @@ interface RescheduleJobRequest {
   runAt: string;
 }
 
+interface CampaignApprovalActionResponse {
+  action: "approve_workflow" | "approve_template" | "start_campaign";
+  approvalId: string;
+  campaignId: string;
+  campaignStatus: string;
+  status: string;
+}
+
+type CampaignApprovalAction = "approve_workflow" | "approve_template" | "start_campaign";
+
 @Controller("campaigns")
 export class CampaignController {
   constructor(
@@ -38,6 +48,20 @@ export class CampaignController {
   list(@Query("limit") limit?: string) {
     const parsed = Number(limit ?? "25");
     return this.campaignService.listCampaigns(parsed);
+  }
+
+  @Get(":campaignId/approvals")
+  approvals(@Param("campaignId") campaignId: string) {
+    return this.campaignService.listCampaignApprovals(campaignId);
+  }
+
+  @Post(":campaignId/approve")
+  approve(
+    @Param("campaignId") campaignId: string,
+    @Body("action") action: CampaignApprovalAction,
+    @Body("reviewer") reviewer?: string
+  ): Promise<CampaignApprovalActionResponse> {
+    return this.campaignService.approveCampaignWorkflow(campaignId, action, reviewer);
   }
 
   @Post("schedule")

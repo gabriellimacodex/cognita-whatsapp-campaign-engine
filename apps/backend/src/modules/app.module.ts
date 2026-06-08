@@ -6,9 +6,10 @@ import { GroupModule } from "./group.module.js";
 import { CampaignModule } from "./campaign.module.js";
 import { ConsentModule } from "./consent.module.js";
 import { OfficialModule } from "./official.module.js";
+import { AudioModule } from "./audio.module.js";
 
 @Module({
-  imports: [GroupModule, CampaignModule, ConsentModule, OfficialModule],
+  imports: [GroupModule, CampaignModule, ConsentModule, OfficialModule, AudioModule],
   controllers: [HealthController, RiskController, WorkflowController]
 })
 export class AppModule {}

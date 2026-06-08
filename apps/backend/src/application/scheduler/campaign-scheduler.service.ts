@@ -11,6 +11,7 @@ import {
 import { AppConfigService } from "../../infrastructure/config/app-config.service.js";
 import { PrismaService } from "../../infrastructure/prisma/prisma.service.js";
 import { GroupSyncService } from "../group/group-sync.service.js";
+import { CampaignService } from "../campaign/campaign.service.js";
 
 type QueueJobPayload = {
   scheduledJobId: string;
@@ -86,6 +87,7 @@ export class CampaignSchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly groupSync: GroupSyncService,
+    private readonly campaignService: CampaignService,
     private readonly config: AppConfigService
   ) {
     const redisUrl = new URL(this.config.env.REDIS_URL);
@@ -103,6 +105,11 @@ export class CampaignSchedulerService {
     const campaign = await this.findCampaignForScheduling(input.campaignId);
     if (!campaign) {
       throw new NotFoundException("Campaign not found");
+    }
+
+    const startApproved = await this.campaignService.assertCampaignStartApproved(campaign.id);
+    if (!startApproved) {
+      throw new BadRequestException("Campaign must be approved for start before scheduling");
     }
 
     const campaignStatus = campaign.status as string;

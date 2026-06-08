@@ -12,6 +12,7 @@ type PrismaClientLike = {
   scheduledJob: any;
   sendAttempt: any;
   campaign: any;
+  approval: any;
   $disconnect: () => Promise<void>;
 };
 
@@ -266,8 +267,10 @@ async function run() {
       }
 
       const risk = await evaluateSendRisk(
-        buildGroupRiskContext({
+        await buildGroupRiskContext({
+          prisma,
           campaignStatus: scheduledJob.campaign?.status,
+          campaignId: scheduledJob.campaign?.id || scheduledJob.campaignId,
           groupTarget: scheduledJob.groupTarget,
           runAt: scheduledJob.runAt
         })
@@ -524,12 +527,28 @@ function isTransientSendError(message: string) {
   }) as Promise<{ id: string }>;
 }
 
-function buildGroupRiskContext(params: {
+async function buildGroupRiskContext(params: {
+  prisma: PrismaClientLike;
   campaignStatus: string | undefined;
+  campaignId: string | undefined;
   groupTarget: RawScheduledJob["groupTarget"] | undefined;
   runAt: Date;
-}) {
-  const campaignApproved = params.campaignStatus === "templates_approved" || params.campaignStatus === "scheduled" || params.campaignStatus === "running" || params.campaignStatus === "paused" || params.campaignStatus === "completed";
+}): Promise<SendPolicyContext> {
+  const campaignApprovedByStatus = params.campaignStatus === "templates_approved" || params.campaignStatus === "scheduled" || params.campaignStatus === "running" || params.campaignStatus === "paused" || params.campaignStatus === "completed";
+  const startApproved = params.prisma.approval
+    ? Boolean(
+        await (params.prisma.approval as any).findFirst({
+          where: {
+            entityType: "campaign",
+            entityId: params.campaignId || "",
+            action: "start_campaign",
+            status: "approved"
+          }
+        })
+      )
+    : false;
+
+  const campaignApproved = campaignApprovedByStatus && startApproved;
 
   const context: SendPolicyContext = {
     campaignApproved,

@@ -1,7 +1,20 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Activity, CalendarClock, CheckCircle2, CircleAlert, Pause, Play, RefreshCw, Send, Trash2, Users } from "lucide-react";
+import {
+  Activity,
+  CalendarClock,
+  CheckCircle2,
+  CircleAlert,
+  Pause,
+  Play,
+  RefreshCw,
+  Send,
+  ShieldCheck,
+  Trash2,
+  Users,
+  FileAudio
+} from "lucide-react";
 
 interface GroupStatus {
   allowlistJid?: string;
@@ -63,6 +76,21 @@ interface CampaignScheduleRequest {
   groupJid?: string;
 }
 
+type CampaignApprovalAction = "approve_workflow" | "approve_template" | "start_campaign";
+
+interface CampaignApprovalRecord {
+  id: string;
+  status: string;
+  action: CampaignApprovalAction | string;
+  metadata: unknown;
+  notes: string | null;
+  reviewedBy: string | null;
+  requestedBy: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface CampaignScheduleResponse {
   campaignId: string;
   campaignStatus: string;
@@ -86,6 +114,34 @@ interface CampaignJobsResponse {
   campaignId: string;
   campaignName: string;
   jobs: ScheduledJobItem[];
+}
+
+type AudioInstructionStatus =
+  | "uploaded"
+  | "transcribing"
+  | "transcribed"
+  | "needs_review"
+  | "approved_for_workflow"
+  | "rejected";
+
+interface AudioInstructionItem {
+  id: string;
+  campaignId: string | null;
+  originalFileUrl: string;
+  durationMs: number | null;
+  detectedLanguage: string | null;
+  rawTranscript: string | null;
+  reviewedTranscript: string | null;
+  confidence: number | null;
+  contentClass: string | null;
+  status: AudioInstructionStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AudioInstructionsResponse {
+  total: number;
+  items: AudioInstructionItem[];
 }
 
 interface CampaignCreateResponse {
@@ -171,6 +227,9 @@ export default function Home() {
   const [campaignResult, setCampaignResult] = useState<CampaignCreateResponse | null>(null);
   const [campaignMessage, setCampaignMessage] = useState("");
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([]);
+  const [campaignApprovalsByCampaign, setCampaignApprovalsByCampaign] = useState<Record<string, CampaignApprovalRecord[]>>({});
+  const [selectedCampaignForApprovals, setSelectedCampaignForApprovals] = useState<string>("");
+  const [campaignApprovalLoading, setCampaignApprovalLoading] = useState<Record<string, boolean>>({});
   const [selectedCampaignId, setSelectedCampaignId] = useState("");
   const [campaignJobs, setCampaignJobs] = useState<ScheduledJobItem[]>([]);
   const [campaignJobsCampaignName, setCampaignJobsCampaignName] = useState("");
@@ -188,11 +247,32 @@ export default function Home() {
   const [optInPayloadResult, setOptInPayloadResult] = useState("");
   const [officialAttempts, setOfficialAttempts] = useState<OfficialSendAttempt[]>([]);
 
+  const [audioListCampaignId, setAudioListCampaignId] = useState("");
+  const [audioListStatus, setAudioListStatus] = useState("");
+  const [audioListLimit, setAudioListLimit] = useState("25");
+  const [audioInstructions, setAudioInstructions] = useState<AudioInstructionItem[]>([]);
+  const [audioInstructionsLoading, setAudioInstructionsLoading] = useState(false);
+  const [audioInstructionMessage, setAudioInstructionMessage] = useState("");
+  const [audioCreatorCampaignId, setAudioCreatorCampaignId] = useState("");
+  const [audioOriginalFileUrl, setAudioOriginalFileUrl] = useState("");
+  const [audioDurationMs, setAudioDurationMs] = useState("");
+  const [audioDetectedLanguage, setAudioDetectedLanguage] = useState("");
+  const [audioRawTranscript, setAudioRawTranscript] = useState("");
+  const [audioReviewedTranscript, setAudioReviewedTranscript] = useState("");
+  const [audioConfidence, setAudioConfidence] = useState("");
+  const [audioContentClass, setAudioContentClass] = useState("");
+  const [audioStatus, setAudioStatus] = useState<AudioInstructionStatus>("uploaded");
+  const [audioUpdatingId, setAudioUpdatingId] = useState("");
+  const [audioUpdateStatus, setAudioUpdateStatus] = useState<AudioInstructionStatus>("uploaded");
+  const [audioUpdateConfidence, setAudioUpdateConfidence] = useState("");
+  const [audioUpdateReviewedTranscript, setAudioUpdateReviewedTranscript] = useState("");
+  const [audioUpdateContentClass, setAudioUpdateContentClass] = useState("");
+
   const refresh = async () => {
     setLoading(true);
     setCampaignActionMessage("");
     try {
-      const [allowlisted, uazapiStatus, discovered, recentAttempts, campaignList] = await Promise.all([
+      const [allowlisted, uazapiStatus, discovered, recentAttempts, campaignList, audioInstructionResult] = await Promise.all([
         fetchJson<{ group: { name?: string; remoteJid: string; extractionCount: number } | null; configuredAllowlist: string }>(
           "/integration/uazapi/groups/allowlisted"
         ),
@@ -201,7 +281,8 @@ export default function Home() {
         ),
         fetchJson<{ items: ContactResult[] }>("/integration/uazapi/contacts/discovered?limit=25"),
         fetchJson<OfficialSendAttempt[]>("/integration/capsule/send-attempts?limit=20"),
-        fetchJson<CampaignSummary[] | CampaignListResponse>("/campaigns?limit=200")
+        fetchJson<CampaignSummary[] | CampaignListResponse>("/campaigns?limit=200"),
+        fetchJson<AudioInstructionsResponse>("/audio-instructions?limit=25")
       ]);
       setGroupInfo(allowlisted);
       setStatus(uazapiStatus);
@@ -211,6 +292,7 @@ export default function Home() {
         ? campaignList
         : campaignList.items ?? [];
       setCampaigns(resolvedCampaigns);
+      setAudioInstructions(audioInstructionResult.items);
       setMessage("");
     } catch (error) {
       setMessage((error as Error).message || "Falha ao carregar status da integração");
@@ -484,6 +566,145 @@ export default function Home() {
   };
 
   const isCampaignActionLoading = (key: string) => Boolean(campaignActionLoading[key]);
+  const isCampaignApprovalLoading = (key: string) => Boolean(campaignApprovalLoading[key]);
+
+  const withCampaignApprovalLoading = async (campaignId: string, action: string, execute: () => Promise<void>) => {
+    const key = `${action}:${campaignId}`;
+    setCampaignApprovalLoading((current) => ({ ...current, [key]: true }));
+    try {
+      await execute();
+    } finally {
+      setCampaignApprovalLoading((current) => ({ ...current, [key]: false }));
+    }
+  };
+
+  const loadCampaignApprovals = async (campaignId: string) => {
+    setCampaignApprovalsByCampaign((current) => ({ ...current, [campaignId]: [] }));
+    try {
+      const approvals = await fetchJson<CampaignApprovalRecord[]>(`/campaigns/${campaignId}/approvals`);
+      setCampaignApprovalsByCampaign((current) => ({ ...current, [campaignId]: approvals }));
+      setSelectedCampaignForApprovals(campaignId);
+    } catch (error) {
+      setCampaignActionMessage((error as Error).message || "Falha ao carregar aprovações da campanha");
+    }
+  };
+
+  const approveCampaignAction = async (campaignId: string, action: CampaignApprovalAction) => {
+    await withCampaignApprovalLoading(campaignId, action, async () => {
+      await fetchJson(`/campaigns/${campaignId}/approve`, {
+        method: "POST",
+        body: JSON.stringify({
+          action,
+          reviewer: "operator"
+        })
+      });
+      await loadCampaignApprovals(campaignId);
+      await refresh();
+      setCampaignActionMessage(`Ação ${action} registrada para a campanha ${campaignId}`);
+    });
+  };
+
+  const loadAudioInstructions = async () => {
+    setAudioInstructionsLoading(true);
+    setAudioInstructionMessage("");
+    try {
+      const params = new URLSearchParams();
+      if (audioListCampaignId.trim()) {
+        params.set("campaignId", audioListCampaignId.trim());
+      }
+      if (audioListStatus.trim()) {
+        params.set("status", audioListStatus.trim());
+      }
+      if (audioListLimit.trim()) {
+        params.set("limit", audioListLimit.trim());
+      }
+
+      const query = params.toString();
+      const result = await fetchJson<AudioInstructionsResponse>(`/audio-instructions${query ? `?${query}` : ""}`);
+      setAudioInstructions(result.items);
+      setAudioInstructionMessage(`Instruções carregadas: ${result.total}`);
+    } catch (error) {
+      setAudioInstructionMessage((error as Error).message || "Falha ao carregar instruções de áudio");
+    } finally {
+      setAudioInstructionsLoading(false);
+    }
+  };
+
+  const createAudioInstruction = async () => {
+    if (!audioOriginalFileUrl.trim()) {
+      setAudioInstructionMessage("Informe o link do arquivo de áudio");
+      return;
+    }
+
+    setAudioInstructionMessage("");
+    setAudioInstructionsLoading(true);
+    try {
+      const parsedDuration = Number(audioDurationMs);
+      const parsedConfidence = Number(audioConfidence);
+      await fetchJson<AudioInstructionItem>("/audio-instructions", {
+        method: "POST",
+        body: JSON.stringify({
+          campaignId: audioCreatorCampaignId.trim() || undefined,
+          originalFileUrl: audioOriginalFileUrl.trim(),
+          durationMs: Number.isFinite(parsedDuration) ? parsedDuration : undefined,
+          detectedLanguage: audioDetectedLanguage.trim() || undefined,
+          rawTranscript: audioRawTranscript.trim() || undefined,
+          reviewedTranscript: audioReviewedTranscript.trim() || undefined,
+          confidence: Number.isFinite(parsedConfidence) ? parsedConfidence : undefined,
+          contentClass: audioContentClass.trim() || undefined,
+          status: audioStatus
+        })
+      });
+
+      setAudioOriginalFileUrl("");
+      setAudioDurationMs("");
+      setAudioDetectedLanguage("");
+      setAudioRawTranscript("");
+      setAudioReviewedTranscript("");
+      setAudioConfidence("");
+      setAudioContentClass("");
+      setAudioStatus("uploaded");
+      setAudioInstructionMessage("Instrução de áudio registrada.");
+      await loadAudioInstructions();
+    } catch (error) {
+      setAudioInstructionMessage((error as Error).message || "Falha ao registrar instrução de áudio");
+    } finally {
+      setAudioInstructionsLoading(false);
+    }
+  };
+
+  const prepareAudioUpdate = (instruction: AudioInstructionItem) => {
+    setAudioUpdatingId(instruction.id);
+    setAudioUpdateStatus(instruction.status);
+    setAudioUpdateConfidence(instruction.confidence?.toString() ?? "");
+    setAudioUpdateReviewedTranscript(instruction.reviewedTranscript ?? "");
+    setAudioUpdateContentClass(instruction.contentClass ?? "");
+    setAudioInstructionMessage("");
+  };
+
+  const applyAudioUpdate = async (instructionId: string) => {
+    const parsedConfidence = Number(audioUpdateConfidence);
+    setAudioInstructionMessage("");
+    setAudioInstructionsLoading(true);
+    try {
+      await fetchJson(`/audio-instructions/${instructionId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: audioUpdateStatus,
+          reviewedTranscript: audioUpdateReviewedTranscript.trim() || undefined,
+          contentClass: audioUpdateContentClass.trim() || undefined,
+          confidence: Number.isFinite(parsedConfidence) ? parsedConfidence : undefined
+        })
+      });
+      setAudioUpdatingId("");
+      setAudioInstructionMessage("Instrução de áudio atualizada.");
+      await loadAudioInstructions();
+    } catch (error) {
+      setAudioInstructionMessage((error as Error).message || "Falha ao atualizar instrução de áudio");
+    } finally {
+      setAudioInstructionsLoading(false);
+    }
+  };
 
   return (
     <main className="min-h-screen px-6 py-6 lg:px-10">
@@ -664,22 +885,29 @@ export default function Home() {
                       <p className="text-xs text-slate-500">Status: {campaign.status}</p>
                       <p className="text-xs text-slate-500">Timezone: {campaign.timezone}</p>
                       <p className="mt-2 text-xs text-slate-500">Criada: {new Date(campaign.createdAt).toLocaleString()}</p>
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => void scheduleCampaign(campaign.id)}
+	                          <div className="mt-3 flex flex-wrap gap-2">
+	                            <button
+	                              type="button"
+	                              onClick={() => void scheduleCampaign(campaign.id)}
                           disabled={isCampaignActionLoading(`schedule:${campaign.id}`)}
                           className="rounded-md border border-line bg-slate-900 px-3 py-2 text-xs text-white disabled:opacity-50"
                         >
-                          {isCampaignActionLoading(`schedule:${campaign.id}`) ? "Agendando..." : "Agendar"}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void loadCampaignJobs(campaign.id)}
-                          className="rounded-md border border-line bg-mist px-3 py-2 text-xs"
-                        >
-                          Ver jobs
-                        </button>
+	                              {isCampaignActionLoading(`schedule:${campaign.id}`) ? "Agendando..." : "Agendar"}
+	                            </button>
+	                            <button
+	                              type="button"
+	                              onClick={() => void loadCampaignApprovals(campaign.id)}
+	                              className="rounded-md border border-line bg-mist px-3 py-2 text-xs"
+	                            >
+	                              {selectedCampaignForApprovals === campaign.id ? "Atualizar aprovações" : "Ver aprovações"}
+	                            </button>
+	                            <button
+	                              type="button"
+	                              onClick={() => void loadCampaignJobs(campaign.id)}
+	                              className="rounded-md border border-line bg-mist px-3 py-2 text-xs"
+	                            >
+	                              Ver jobs
+	                            </button>
                         <button
                           type="button"
                           onClick={() => void pauseCampaign(campaign.id)}
@@ -706,12 +934,61 @@ export default function Home() {
                         >
                           <Trash2 className="mr-1 inline-block h-3.5 w-3.5" aria-hidden="true" />
                           {isCampaignActionLoading(`cancel:${campaign.id}`) ? "..." : "Cancelar"}
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
+	                              </button>
+	                            <button
+	                              type="button"
+	                              onClick={() => void approveCampaignAction(campaign.id, "approve_workflow")}
+	                              disabled={isCampaignApprovalLoading(`approve_workflow:${campaign.id}`)}
+	                              className="rounded-md border border-line bg-emerald-50 px-3 py-2 text-xs text-emerald-700 disabled:opacity-50"
+	                            >
+	                              <ShieldCheck className="mr-1 inline-block h-3.5 w-3.5" aria-hidden="true" />
+	                              {isCampaignApprovalLoading(`approve_workflow:${campaign.id}`) ? "Aprovando..." : "Aprovar workflow"}
+	                            </button>
+	                            <button
+	                              type="button"
+	                              onClick={() => void approveCampaignAction(campaign.id, "approve_template")}
+	                              disabled={isCampaignApprovalLoading(`approve_template:${campaign.id}`)}
+	                              className="rounded-md border border-line bg-emerald-50 px-3 py-2 text-xs text-emerald-700 disabled:opacity-50"
+	                            >
+	                              {isCampaignApprovalLoading(`approve_template:${campaign.id}`) ? "Aprovando..." : "Aprovar template"}
+	                            </button>
+	                            <button
+	                              type="button"
+	                              onClick={() => void approveCampaignAction(campaign.id, "start_campaign")}
+	                              disabled={isCampaignApprovalLoading(`start_campaign:${campaign.id}`)}
+	                              className="rounded-md border border-line bg-emerald-50 px-3 py-2 text-xs text-emerald-700 disabled:opacity-50"
+	                            >
+	                              {isCampaignApprovalLoading(`start_campaign:${campaign.id}`) ? "Aprovando..." : "Aprovar início"}
+	                            </button>
+	                          </div>
+	                        {selectedCampaignForApprovals === campaign.id ? (
+                          <div className="mt-3 rounded-md border border-line bg-white p-2">
+                            {(() => {
+                              const approvals = campaignApprovalsByCampaign[campaign.id] ?? [];
+                              return approvals.length ? (
+                                <div className="max-h-40 overflow-auto space-y-2">
+                                  {approvals.map((approval) => (
+                                    <div
+                                      key={approval.id}
+                                      className="rounded border border-line px-2 py-1 text-xs"
+                                    >
+                                      <p className="font-medium text-slate-800">{approval.action}</p>
+                                      <p className="text-slate-500">
+                                        status: {approval.status} | criado: {new Date(approval.createdAt).toLocaleString()}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-500">Ainda sem aprovações registradas.</p>
+                              );
+                            })()}
+                          </div>
+                        ) : null}
+	                        </div>
+	                      ))
+	                    )}
+	                  </div>
 
               <div className="rounded-md border border-line">
                 <div className="border-b border-line p-3">
@@ -829,6 +1106,264 @@ export default function Home() {
               </table>
             </div>
           )}
+        </article>
+
+        <article className="rounded-lg border border-line bg-white p-5 shadow-panel">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-ink">Áudio do usuário e instruções da campanha</h2>
+            <FileAudio className="h-5 w-5 text-accent" aria-hidden="true" />
+          </div>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <section className="space-y-3">
+              <p className="text-sm text-slate-600">Cadastro manual da instrução de áudio (pré-processamento da etapa)</p>
+              <label className="block text-sm">
+                <span className="text-slate-700">Campaign ID (opcional)</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                  value={audioCreatorCampaignId}
+                  onChange={(event) => setAudioCreatorCampaignId(event.target.value)}
+                  placeholder="ID da campanha (opcional)"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-700">Arquivo (URL pública do áudio)</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                  value={audioOriginalFileUrl}
+                  onChange={(event) => setAudioOriginalFileUrl(event.target.value)}
+                  placeholder="https://..."
+                />
+              </label>
+              <div className="grid gap-2 md:grid-cols-3">
+                <label className="block text-sm">
+                  <span className="text-slate-700">Duração (ms)</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                    value={audioDurationMs}
+                    onChange={(event) => setAudioDurationMs(event.target.value)}
+                    placeholder="120000"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-700">Idioma</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                    value={audioDetectedLanguage}
+                    onChange={(event) => setAudioDetectedLanguage(event.target.value)}
+                    placeholder="pt-BR"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-700">Status</span>
+                  <select
+                    value={audioStatus}
+                    onChange={(event) => setAudioStatus(event.target.value as AudioInstructionStatus)}
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                  >
+                    <option value="uploaded">uploaded</option>
+                    <option value="transcribing">transcribing</option>
+                    <option value="transcribed">transcribed</option>
+                    <option value="needs_review">needs_review</option>
+                    <option value="approved_for_workflow">approved_for_workflow</option>
+                    <option value="rejected">rejected</option>
+                  </select>
+                </label>
+              </div>
+              <label className="block text-sm">
+                <span className="text-slate-700">Classificação</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                  value={audioContentClass}
+                  onChange={(event) => setAudioContentClass(event.target.value)}
+                  placeholder="template, timing, routing..."
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-700">Transcrição bruta</span>
+                <textarea
+                  className="mt-1 min-h-[110px] w-full rounded-md border border-line px-3 py-2 text-xs"
+                  value={audioRawTranscript}
+                  onChange={(event) => setAudioRawTranscript(event.target.value)}
+                  placeholder="Cole aqui a transcrição bruta"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="text-slate-700">Transcrição revisada</span>
+                <textarea
+                  className="mt-1 min-h-[110px] w-full rounded-md border border-line px-3 py-2 text-xs"
+                  value={audioReviewedTranscript}
+                  onChange={(event) => setAudioReviewedTranscript(event.target.value)}
+                  placeholder="Ajuste manual da transcrição (opcional)"
+                />
+              </label>
+              <div className="grid gap-2 md:grid-cols-3">
+                <label className="block text-sm">
+                  <span className="text-slate-700">Confiança</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                    value={audioConfidence}
+                    onChange={(event) => setAudioConfidence(event.target.value)}
+                    placeholder="0.97"
+                  />
+                </label>
+                <div className="block text-sm md:col-span-2">
+                  <p className="text-slate-700">Filtros / busca</p>
+                  <button
+                    type="button"
+                    onClick={() => void loadAudioInstructions()}
+                    className="mt-1 inline-flex w-full justify-center rounded-md border border-line bg-mist px-3 py-2 text-sm"
+                  >
+                    Atualizar lista atual
+                  </button>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void createAudioInstruction()}
+                className="rounded-md border border-line bg-slate-900 px-4 py-2 text-sm text-white"
+                disabled={audioInstructionsLoading}
+              >
+                {audioInstructionsLoading ? "Registrando..." : "Registrar instrução"}
+              </button>
+            </section>
+
+            <section className="space-y-3">
+              <div className="grid gap-2 md:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="text-slate-700">Filtrar por campaignId</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                    value={audioListCampaignId}
+                    onChange={(event) => setAudioListCampaignId(event.target.value)}
+                    placeholder="campanha"
+                  />
+                </label>
+                <label className="block text-sm">
+                  <span className="text-slate-700">Filtrar por status</span>
+                  <input
+                    className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                    value={audioListStatus}
+                    onChange={(event) => setAudioListStatus(event.target.value)}
+                    placeholder="uploaded, transcribed..."
+                  />
+                </label>
+              </div>
+              <label className="block text-sm">
+                <span className="text-slate-700">Limite</span>
+                <input
+                  className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                  value={audioListLimit}
+                  onChange={(event) => setAudioListLimit(event.target.value)}
+                  placeholder="25"
+                />
+              </label>
+              <div className="overflow-auto rounded-md border border-line">
+                {audioInstructionsLoading ? (
+                  <p className="p-3 text-sm text-slate-500">Carregando instruções...</p>
+                ) : audioInstructions.length === 0 ? (
+                  <p className="p-3 text-sm text-slate-500">Nenhuma instrução cadastrada.</p>
+                ) : (
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-line text-slate-500">
+                        <th className="py-2 pr-2 pl-3">Arquivo</th>
+                        <th className="py-2 pr-2">Status</th>
+                        <th className="py-2 pr-2">Confiança</th>
+                        <th className="py-2 pr-2">Ações</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {audioInstructions.map((instruction) => (
+                        <tr key={instruction.id} className="border-b border-line last:border-0">
+                          <td className="max-w-[260px] px-2 py-2">
+                            <p className="truncate text-xs text-slate-500" title={instruction.originalFileUrl}>
+                              {instruction.originalFileUrl}
+                            </p>
+                            <p className="text-[11px] text-slate-500">ID: {instruction.id}</p>
+                            <p className="text-[11px] text-slate-500">Campanha: {instruction.campaignId ?? "-"}</p>
+                          </td>
+                          <td className="px-2 py-2">{instruction.status}</td>
+                          <td className="px-2 py-2">{instruction.confidence?.toFixed(2) ?? "-"}</td>
+                          <td className="px-2 py-2">
+                            <button
+                              type="button"
+                              onClick={() => prepareAudioUpdate(instruction)}
+                              className="rounded-md border border-line bg-mist px-3 py-1 text-xs"
+                            >
+                              Revisar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+              {audioUpdatingId ? (
+                <div className="rounded-md border border-line bg-mist p-3">
+                  <p className="text-sm font-medium text-slate-700">Revisão de instrução</p>
+                  <div className="mt-2 grid gap-2 md:grid-cols-2">
+                    <label className="block text-sm">
+                      <span className="text-slate-700">Status</span>
+                      <select
+                        value={audioUpdateStatus}
+                        onChange={(event) => setAudioUpdateStatus(event.target.value as AudioInstructionStatus)}
+                        className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                      >
+                        <option value="uploaded">uploaded</option>
+                        <option value="transcribing">transcribing</option>
+                        <option value="transcribed">transcribed</option>
+                        <option value="needs_review">needs_review</option>
+                        <option value="approved_for_workflow">approved_for_workflow</option>
+                        <option value="rejected">rejected</option>
+                      </select>
+                    </label>
+                    <label className="block text-sm">
+                      <span className="text-slate-700">Confiança</span>
+                      <input
+                        className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                        value={audioUpdateConfidence}
+                        onChange={(event) => setAudioUpdateConfidence(event.target.value)}
+                      />
+                    </label>
+                  </div>
+                  <label className="mt-2 block text-sm">
+                    <span className="text-slate-700">Classificação</span>
+                    <input
+                      className="mt-1 w-full rounded-md border border-line px-3 py-2"
+                      value={audioUpdateContentClass}
+                      onChange={(event) => setAudioUpdateContentClass(event.target.value)}
+                    />
+                  </label>
+                  <label className="mt-2 block text-sm">
+                    <span className="text-slate-700">Transcrição revisada</span>
+                    <textarea
+                      className="mt-1 min-h-[100px] w-full rounded-md border border-line px-3 py-2 text-xs"
+                      value={audioUpdateReviewedTranscript}
+                      onChange={(event) => setAudioUpdateReviewedTranscript(event.target.value)}
+                    />
+                  </label>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void applyAudioUpdate(audioUpdatingId)}
+                      className="rounded-md border border-line bg-slate-900 px-3 py-2 text-xs text-white"
+                    >
+                      Salvar revisão
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAudioUpdatingId("")}
+                      className="rounded-md border border-line bg-mist px-3 py-2 text-xs"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </section>
+          </div>
+          {audioInstructionMessage ? <p className="mt-3 rounded-md border border-line bg-amber-50 px-3 py-2 text-sm text-amber-700">{audioInstructionMessage}</p> : null}
         </article>
 
         <article className="rounded-lg border border-line bg-white p-5 shadow-panel">

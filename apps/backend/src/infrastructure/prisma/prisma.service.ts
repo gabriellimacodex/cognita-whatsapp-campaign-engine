@@ -89,6 +89,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     return this.client.scheduledJob as any;
   }
 
+  get userAudioInstruction(): any {
+    return this.client.userAudioInstruction as any;
+  }
+
   get channelAccount(): any {
     return this.client.channelAccount as any;
   }
