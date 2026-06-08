@@ -19,9 +19,11 @@ ENV NODE_ENV=production
 RUN corepack enable
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json /app/tsconfig.base.json ./
 COPY --from=build /app/apps/worker/package.json ./apps/worker/package.json
+COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/packages/domain/package.json ./packages/domain/package.json
 COPY --from=build /app/packages/config/package.json ./packages/config/package.json
 RUN pnpm install --filter @cognita-campaign/worker... --prod --frozen-lockfile=false
+RUN pnpm exec prisma generate --schema=prisma/schema.prisma
 COPY --from=build /app/apps/worker/dist ./apps/worker/dist
 COPY --from=build /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build /app/packages/config/dist ./packages/config/dist

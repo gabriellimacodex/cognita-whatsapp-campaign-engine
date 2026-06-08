@@ -13,6 +13,7 @@
   "dependencies": {
     "bullmq": "^5.34.2",
     "@prisma/client": "^6.19.3",
+    "prisma": "^6.19.3",
     "@cognita-campaign/config": "workspace:*",
     "@cognita-campaign/domain": "workspace:*",
     "@nestjs/common": "^10.4.15",
