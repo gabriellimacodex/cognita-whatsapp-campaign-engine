@@ -9,7 +9,7 @@ import type {
   TemplateRecord,
   TemplateSubmissionResult
 } from "@cognita-campaign/domain";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, Logger, NotFoundException } from "@nestjs/common";
 import { AppConfigService } from "../config/app-config.service.js";
 
 type RawTemplate = {
@@ -82,20 +82,29 @@ function coalesceTemplate(raw: unknown): TemplateRecord | null {
 export class CapsuleAdapterService implements MessagingProvider, TemplateProvider {
   private readonly baseUrl: string;
   private readonly apiKey: string;
+  private readonly enabled: boolean;
+  private readonly logger = new Logger(CapsuleAdapterService.name);
 
   constructor(private readonly config: AppConfigService) {
     this.baseUrl = (config.env.CAPSULE_BASE_URL ?? "").replace(/\/+$/, "");
     this.apiKey = config.env.CAPSULE_API_KEY ?? "";
+    this.enabled = Boolean(this.baseUrl && this.apiKey);
 
-    if (!this.baseUrl) {
-      throw new Error("CAPSULE_BASE_URL is not configured");
+    if (!this.enabled) {
+      this.logger.warn(
+        "CAPSULE integration disabled. Configure CAPSULE_BASE_URL and CAPSULE_API_KEY to enable official provider operations."
+      );
     }
-    if (!this.apiKey) {
-      throw new Error("CAPSULE_API_KEY is not configured");
+  }
+
+  private ensureConfigured(action: string): void {
+    if (!this.enabled) {
+      throw new Error(`CAPSULE integration is disabled. Cannot ${action} until CAPSULE_BASE_URL and CAPSULE_API_KEY are set.`);
     }
   }
 
   private async request<T>(path: string, options: { method?: "GET" | "POST"; body?: Record<string, unknown>; query?: Record<string, string> } = {}): Promise<T> {
+    this.ensureConfigured("call Capsule API");
     const url = new URL(path.startsWith("/") ? path : `/${path}`, this.baseUrl);
     if (options.query) {
       for (const [key, value] of Object.entries(options.query)) {
@@ -135,6 +144,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async getHealth(accountId: string): Promise<{ status: "healthy" | "unhealthy" | "degraded" | "unknown"; checkedAt: Date; reason?: string }> {
+    this.ensureConfigured("check CAPSULE health");
     try {
       const payload = await this.request<HealthStatus>("/health");
       const normalized = payload.status?.toLowerCase();
@@ -156,6 +166,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async sendMessage(input: SendMessageInput): Promise<SendResult> {
+    this.ensureConfigured("send a message");
     const response = await this.request<{ messageId?: string; message_id?: string; status?: string }>(
       "/messages/text",
       {
@@ -179,6 +190,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async sendTemplate(input: SendTemplateInput): Promise<SendResult> {
+    this.ensureConfigured("send a template");
     const response = await this.request<{ messageId?: string; message_id?: string; status?: string }>(
       "/messages/template",
       {
@@ -204,6 +216,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async getMessage(messageId: string): Promise<MessageRecord | null> {
+    this.ensureConfigured("get a message");
     const response = await this.request<{ id?: string; status?: string; raw?: unknown }>(`/messages/${messageId}`, {
       method: "GET"
     });
@@ -218,6 +231,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async listTemplates(accountId: string): Promise<TemplateRecord[]> {
+    this.ensureConfigured("list templates");
     const payload = await this.request<unknown>("/templates", {
       method: "GET",
       query: { accountId }
@@ -232,6 +246,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async submitTemplate(input: SubmitTemplateInput): Promise<TemplateSubmissionResult> {
+    this.ensureConfigured("submit a template");
     const payload = await this.request<{
       id?: string;
       templateName?: string;
@@ -258,6 +273,7 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
   }
 
   async getTemplateStatus(accountId: string, templateName: string): Promise<TemplateRecord | null> {
+    this.ensureConfigured("check template status");
     try {
       const payload = await this.request<RawTemplate>(`/templates/${encodeURIComponent(templateName)}`, {
         method: "GET",
@@ -269,4 +285,3 @@ export class CapsuleAdapterService implements MessagingProvider, TemplateProvide
     }
   }
 }
-
