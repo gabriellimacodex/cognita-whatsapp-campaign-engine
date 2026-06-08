@@ -16,12 +16,14 @@ RUN pnpm --filter @cognita-campaign/backend... build
 FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/apps/backend/dist ./apps/backend/dist
+RUN corepack enable
+COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml /app/turbo.json /app/tsconfig.base.json ./
 COPY --from=build /app/apps/backend/package.json ./apps/backend/package.json
-COPY --from=build /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build /app/packages/domain/package.json ./packages/domain/package.json
-COPY --from=build /app/packages/config/dist ./packages/config/dist
 COPY --from=build /app/packages/config/package.json ./packages/config/package.json
+RUN pnpm install --filter @cognita-campaign/backend... --prod --frozen-lockfile=false
+COPY --from=build /app/apps/backend/dist ./apps/backend/dist
+COPY --from=build /app/packages/domain/dist ./packages/domain/dist
+COPY --from=build /app/packages/config/dist ./packages/config/dist
 EXPOSE 3001
 CMD ["node", "apps/backend/dist/main.js"]
