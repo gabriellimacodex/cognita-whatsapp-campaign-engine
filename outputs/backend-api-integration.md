@@ -22,6 +22,11 @@
     - `ContactConsent` com status `group_member_discovered`
     - `GroupContactExtraction`
 
+- `POST /integration/uazapi/groups/extract/preview`
+  - Body opcional: `{ "groupJid": "...@g.us" }`.
+  - Mesma validação de allowlist e conectividade da rota real, porém **sem persistência**.
+  - Retorna a lista de participantes normalizados e o efeito esperado (`would_keep`/`would_create_consent`) para revisão antes da extração.
+
 - `POST /workflow/validate`
   - Recebe um `WorkflowDefinition` e retorna `{ valid, issues }` com validação estrutural.
   - Regras de validação incluem:
