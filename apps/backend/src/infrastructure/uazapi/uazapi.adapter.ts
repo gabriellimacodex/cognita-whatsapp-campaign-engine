@@ -490,7 +490,10 @@ export class UazapiAdapterService implements GroupProvider {
   private mapGroup(participant: unknown): GroupRemoteRecord | null {
     if (!participant || typeof participant !== "object") return null;
     const candidate = participant as Record<string, unknown>;
-    const jid = this.extractStringField(candidate, ["jid", "groupjid", "groupJid", "id"]);
+    const jid = this.extractStringField(
+      candidate,
+      ["jid", "groupjid", "groupJid", "id", "JID", "GroupId", "group_id", "group_id_jid", "groupId"]
+    );
     if (!jid || !jid.endsWith("@g.us")) {
       return null;
     }
