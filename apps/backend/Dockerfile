@@ -33,5 +33,7 @@ RUN PRISMA_CLIENT_PATH="$(ls -d /app/node_modules/.pnpm/@prisma+client@* | head 
 COPY --from=build /app/apps/backend/dist ./apps/backend/dist
 COPY --from=build /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build /app/packages/config/dist ./packages/config/dist
+COPY --from=build /app/apps/backend/scripts ./apps/backend/scripts
+RUN chmod +x apps/backend/scripts/bootstrap-db.sh
 EXPOSE 3001
-CMD ["node", "apps/backend/dist/main.js"]
+ENTRYPOINT ["sh", "/app/apps/backend/scripts/bootstrap-db.sh"]
