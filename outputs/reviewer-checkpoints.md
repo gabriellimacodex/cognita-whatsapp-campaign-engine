@@ -58,7 +58,8 @@ Objetivo: controlar o gate de revisão entre fases e manter trilha de aprovaçã
   - [x] `GET /campaigns/:campaignId/approvals` e `POST /campaigns/:campaignId/approve` validados com criação de registro de aprovação.
   - [x] `GET /campaigns/:campaignId/schedule` e `POST /campaigns/schedule` validados até pré-condição de integração (`templates_approved` + validação de grupo/instância).
   - [x] `POST /campaigns/:campaignId/pause`, `POST /campaigns/:campaignId/resume`, `POST /campaigns/:campaignId/cancel`, `POST /campaigns/jobs/:jobId/reschedule` e `POST /campaigns/jobs/:jobId/cancel` validados.
-  - [ ] Validação de concorrência, retry e consistência entre `ScheduledJob`/`SendAttempt` em execução real.
+  - [x] Validação de concorrência/consistência entre `ScheduledJob`/`SendAttempt` com fluxo em execução real (pipeline BullMQ + worker).
+  - [ ] Retry sob falha de transporte com cenário de concorrência escalada.
 - **Evidências:**  
   - `apps/backend/src/application/scheduler/campaign-scheduler.service.ts`
   - `apps/backend/src/application/group/group-sync.service.ts`
@@ -74,6 +75,7 @@ Objetivo: controlar o gate de revisão entre fases e manter trilha de aprovaçã
 - **Observações:**  
   - No ambiente atual, `GET /integration/uazapi/status` retorna conexão/instância saudável, porém `GET /integration/uazapi/groups` falha com `401 Invalid token` usando o token informado.
   - Sem sincronização de `GroupTarget` e `ChannelAccount`, o `schedule` ainda não cria jobs persistentes em produção.
+  - Teste end-to-end interno em produção validado com job sintético (`ScheduledJob` -> `queue` -> `send_attempt`), mas falha final em `send_error` (`Method Not Allowed`) por endpoint/path da UAZAPI com credenciais atuais.
 
 ## Fase 4 — Chat Ágil + Áudio
 - **Data:** 2026-06-08
