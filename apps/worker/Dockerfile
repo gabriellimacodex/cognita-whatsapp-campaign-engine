@@ -12,6 +12,10 @@ RUN pnpm install --recursive --frozen-lockfile=false
 FROM deps AS build
 COPY . .
 RUN pnpm --filter @cognita-campaign/worker... build
+RUN pnpm prisma generate --schema=prisma/schema.prisma \
+    && mkdir -p /tmp/prisma-client \
+    && PRISMA_CLIENT_PATH="$(ls -d node_modules/.pnpm/@prisma+client@* | head -n 1)" \
+    && cp -a "${PRISMA_CLIENT_PATH}/node_modules/@prisma/client/.prisma" /tmp/prisma-client/
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
@@ -23,7 +27,9 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/packages/domain/package.json ./packages/domain/package.json
 COPY --from=build /app/packages/config/package.json ./packages/config/package.json
 RUN pnpm install --filter @cognita-campaign/worker... --prod --frozen-lockfile=false
-RUN pnpm exec prisma generate --schema=prisma/schema.prisma
+COPY --from=build /tmp/prisma-client /tmp/prisma-client
+RUN PRISMA_CLIENT_PATH="$(ls -d /app/node_modules/.pnpm/@prisma+client@* | head -n 1)" \
+    && cp -a /tmp/prisma-client/.prisma "${PRISMA_CLIENT_PATH}/node_modules/@prisma/client/"
 COPY --from=build /app/apps/worker/dist ./apps/worker/dist
 COPY --from=build /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build /app/packages/config/dist ./packages/config/dist
