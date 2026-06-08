@@ -44,6 +44,25 @@ interface ExtractionResult {
   extractedMembers: number;
 }
 
+interface ExtractionPreviewContact {
+  phoneE164: string;
+  contactId: string | null;
+  displayName: string | null;
+  status: "would_create_consent" | "would_keep";
+  source: string;
+  existingConsentStatus: string | null;
+}
+
+interface ExtractionPreviewResult {
+  preview: true;
+  groupJid: string;
+  groupName: string;
+  groupTargetId: string;
+  extractedMembers: number;
+  upsertedConsents: number;
+  extractedContacts: ExtractionPreviewContact[];
+}
+
 interface WorkflowValidationIssue {
   code: string;
   message: string;
@@ -216,6 +235,8 @@ export default function Home() {
   const [contacts, setContacts] = useState<ContactResult[]>([]);
   const [message, setMessage] = useState<string>("");
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
+  const [extractionPreviewResult, setExtractionPreviewResult] = useState<ExtractionPreviewResult | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const [workflowDraft, setWorkflowDraft] = useState<string>(
     '{\n  "version": "1.0",\n  "timezone": "America/Sao_Paulo",\n  "campaignId": "camp_123",\n  "entry": "start",\n  "nodes": [\n    { "id": "start", "type": "start" },\n    { "id": "tpl_1", "type": "send_text", "channel": "uazapi_group", "messageKey": "boas_vindas" },\n    { "id": "end", "type": "stop" }\n  ],\n  "edges": [\n    { "from": "start", "to": "tpl_1" },\n    { "from": "tpl_1", "to": "end" }\n  ]\n}'
   );
@@ -271,6 +292,7 @@ export default function Home() {
   const refresh = async () => {
     setLoading(true);
     setCampaignActionMessage("");
+    setExtractionPreviewResult(null);
     try {
       const [allowlisted, uazapiStatus, discovered, recentAttempts, campaignList, audioInstructionResult] = await Promise.all([
         fetchJson<{ group: { name?: string; remoteJid: string; extractionCount: number } | null; configuredAllowlist: string }>(
@@ -306,6 +328,11 @@ export default function Home() {
   }, []);
 
   const runExtraction = async () => {
+    if (!extractionPreviewResult) {
+      setMessage("Faça a prévia da extração antes de executar a gravação real.");
+      return;
+    }
+
     setSyncing(true);
     setMessage("");
     try {
@@ -314,11 +341,28 @@ export default function Home() {
         body: JSON.stringify({})
       });
       setExtractionResult(result);
+      setExtractionPreviewResult(null);
       await refresh();
     } catch (error) {
       setMessage((error as Error).message || "Falha ao extrair contatos");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const runExtractionPreview = async () => {
+    setPreviewing(true);
+    setMessage("");
+    try {
+      const result = await fetchJson<ExtractionPreviewResult>("/integration/uazapi/groups/extract/preview", {
+        method: "POST",
+        body: JSON.stringify({})
+      });
+      setExtractionPreviewResult(result);
+    } catch (error) {
+      setMessage((error as Error).message || "Falha ao pré-visualizar extração");
+    } finally {
+      setPreviewing(false);
     }
   };
 
@@ -763,13 +807,65 @@ export default function Home() {
                 <p className="text-sm text-slate-700">
                   Contatos descobertos: <strong>{groupInfo?.group?.extractionCount ?? 0}</strong>
                 </p>
-                <button
-                  disabled={syncing}
-                  onClick={() => void runExtraction()}
-                  className="mt-3 rounded-md border border-line bg-mist px-4 py-2 text-sm disabled:opacity-50"
-                >
-                  {syncing ? "Extraindo..." : "Extrair contatos do grupo allowlist"}
-                </button>
+                <div className="mt-3 grid gap-2">
+                  <button
+                    disabled={previewing}
+                    onClick={() => void runExtractionPreview()}
+                    className="rounded-md border border-line bg-mist px-4 py-2 text-sm disabled:opacity-50"
+                  >
+                    {previewing ? "Analisando..." : "Prévia da extração (sem gravar)"}
+                  </button>
+                  <button
+                    disabled={syncing || !extractionPreviewResult}
+                    onClick={() => void runExtraction()}
+                    className="rounded-md border border-line bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50"
+                  >
+                    {syncing ? "Extraindo..." : "Executar extração real"}
+                  </button>
+                </div>
+                {extractionPreviewResult ? (
+                  <div className="mt-3 space-y-2 rounded-md border border-line bg-mist p-3">
+                    <p className="text-sm font-medium text-slate-800">
+                      Prévia: {extractionPreviewResult.groupName} ({extractionPreviewResult.groupJid})
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Processaria <strong>{extractionPreviewResult.extractedMembers}</strong> contatos no total.
+                    </p>
+                    <p className="text-xs text-slate-600">
+                      Novos consentimentos simulados:{" "}
+                      <strong>{extractionPreviewResult.upsertedConsents}</strong>
+                    </p>
+                    <div className="max-h-56 overflow-auto rounded border border-line bg-white">
+                      <table className="min-w-full text-left text-xs">
+                        <thead className="sticky top-0 bg-white">
+                          <tr className="border-b border-line text-slate-500">
+                            <th className="py-1 px-3">Telefone</th>
+                            <th className="py-1 px-3">Contato</th>
+                            <th className="py-1 px-3">Resultado</th>
+                            <th className="py-1 px-3">Consentimento atual</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {extractionPreviewResult.extractedContacts.map((contact) => (
+                            <tr key={contact.phoneE164} className="border-b border-line last:border-0">
+                              <td className="px-3 py-1 text-slate-700">{contact.phoneE164}</td>
+                              <td className="px-3 py-1 text-slate-700">
+                                {contact.displayName || "Sem nome"}
+                                {contact.contactId ? null : " (novo)"}
+                              </td>
+                              <td className="px-3 py-1 text-slate-700">
+                                {contact.status === "would_create_consent"
+                                  ? "Criar consentimento"
+                                  : "Manter contato"}
+                              </td>
+                              <td className="px-3 py-1 text-slate-700">{contact.existingConsentStatus ?? "—"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : null}
               </div>
             )}
           </article>
