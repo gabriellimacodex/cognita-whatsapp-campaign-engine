@@ -457,32 +457,52 @@ export class UazapiAdapterService implements GroupProvider {
       }
     }
 
-    if (!payload) {
-      throw lastError ?? new Error("Could not get group info from UAZAPI");
+    const candidate = this.parseGroupInfoCandidate(payload);
+    if (candidate?.jid) {
+      return candidate;
     }
 
+    const fallbackPayload = await this.requestAnyPath<unknown>(GROUP_LIST_PATHS, {
+      method: "GET"
+    });
+    const list = this.coerceArray(fallbackPayload).map((entry) => this.coerceObject(entry)).filter((entry): entry is Record<string, unknown> => !!entry);
+    for (const item of list) {
+      const parsed = this.parseGroupInfoCandidate(item);
+      if (parsed && parsed.jid === groupJid) {
+        return parsed;
+      }
+    }
+
+    throw lastError ?? new Error("Could not get group info from UAZAPI");
+  }
+
+  private parseGroupInfoCandidate(payload: unknown): UazapiGroupInfo | null {
     const candidate = this.coerceObject(payload);
     if (!candidate) {
       return null;
     }
 
-    const jid = this.extractStringField(candidate, ["jid", "groupjid", "groupJid"]);
-    if (!jid) {
+    const jid = this.extractStringField(candidate, ["jid", "groupjid", "groupJid", "JID", "GroupId", "group_id"]);
+    if (!jid || !jid.endsWith("@g.us")) {
       return null;
     }
 
-    const participantsCandidate = this.coerceArray(candidate.participants ?? candidate.participantsList ?? []);
+    const participantsCandidate = this.coerceArray(
+      candidate.participants ?? candidate.Participants ?? candidate.participantsList ?? []
+    );
 
     return {
       jid,
-      name: this.extractStringField(candidate, ["name", "subject", "groupName"]),
+      name: this.extractStringField(candidate, ["name", "subject", "groupName", "GroupName", "Nome", "Title"]),
       participants: participantsCandidate
         .map((entry) => this.mapParticipant(entry))
         .filter((participant): participant is UazapiGroupParticipant => participant !== null),
       ownerCanSendMessage: this.boolFromUnknown(
-        candidate.ownerCanSendMessage ?? candidate.canSendMessage ?? candidate.canSendMessages
+        candidate.ownerCanSendMessage ?? candidate.canSendMessage ?? candidate.canSendMessages ?? candidate.OwnerCanSendMessage
       ),
-      ownerIsAdmin: this.boolFromUnknown(candidate.ownerIsAdmin),
+      ownerIsAdmin: this.boolFromUnknown(
+        candidate.ownerIsAdmin ?? candidate.OwnerIsAdmin ?? candidate.isOwnerAdmin
+      ),
       suspended: this.boolFromUnknown(candidate.suspended)
     };
   }
@@ -514,7 +534,9 @@ export class UazapiAdapterService implements GroupProvider {
     const candidate = participant as Record<string, unknown>;
 
     const jid = this.extractStringField(candidate, ["jid", "id", "rawId", "phone", "phone_number"]);
-    if (!jid) return null;
+    const phoneNumber = this.extractStringField(candidate, ["PhoneNumber", "phone", "number"]);
+    const normalizedParticipantJid = jid || (phoneNumber ? `${phoneNumber}@s.whatsapp.net` : "");
+    if (!normalizedParticipantJid) return null;
 
     const displayName = this.extractStringField(
       candidate,
@@ -522,7 +544,7 @@ export class UazapiAdapterService implements GroupProvider {
     );
 
     return {
-      jid,
+      jid: normalizedParticipantJid || jid,
       displayName: displayName || undefined,
       raw: candidate
     };
