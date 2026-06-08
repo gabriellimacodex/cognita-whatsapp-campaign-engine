@@ -29,7 +29,7 @@ COPY --from=build /app/packages/config/package.json ./packages/config/package.js
 RUN pnpm install --filter @cognita-campaign/worker... --prod --frozen-lockfile=false
 COPY --from=build /tmp/prisma-client /tmp/prisma-client
 RUN PRISMA_CLIENT_PATH="$(ls -d /app/node_modules/.pnpm/@prisma+client@* | head -n 1)" \
-    && cp -a /tmp/prisma-client/.prisma "${PRISMA_CLIENT_PATH}/node_modules/@prisma/client/.prisma"
+    && cp -a /tmp/prisma-client/.prisma "${PRISMA_CLIENT_PATH}/node_modules/.prisma"
 COPY --from=build /app/apps/worker/dist ./apps/worker/dist
 COPY --from=build /app/packages/domain/dist ./packages/domain/dist
 COPY --from=build /app/packages/config/dist ./packages/config/dist
