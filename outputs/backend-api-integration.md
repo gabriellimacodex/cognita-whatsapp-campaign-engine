@@ -108,10 +108,13 @@
   - reschedule/cancel de job.
 - Checklist operacional complementar: `outputs/phase3-staging-smoke-checklist.md`.
 
-## Endpoints oficiais (Capsule)
+## Endpoints oficiais (Capsule/Kapso)
 
 - `GET /integration/capsule/health?accountId=...`
   - Health check da conexão/provedor oficial.
+  - O serviço oficial tenta configuração por:
+    - `CAPSULE_BASE_URL` + `CAPSULE_API_KEY`; se não houver, usa
+    - `KAPSO_BASE_URL` + `KAPSO_API_KEY`.
 - `GET /integration/capsule/templates?accountId=...`
   - Lista templates oficiais registrados no provedor.
 - `GET /integration/capsule/templates/{templateName}/status?accountId=...`
@@ -140,7 +143,7 @@
   - Cliente Prisma no Nest (`PrismaService`) + módulo.
 
 - `apps/backend/src/infrastructure/uazapi/uazapi.adapter.ts`
-  - Adapter dos endpoints auditados da UAZAPI (`/instance/status`, `/group/list`, `/group/info`, `/send/text`).
+  - Adapter dos endpoints auditados da UAZAPI (`/status` com fallback para `/instance/status`, `/group/list`, `/group/info`, `/send/text`).
 
 - `apps/backend/src/application/group/group-sync.service.ts`
   - Lógica de sincronização/extracao e persistência de contatos.

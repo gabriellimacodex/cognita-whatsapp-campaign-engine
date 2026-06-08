@@ -339,7 +339,7 @@ Contratos validados em auditoria:
 - Endpoints comuns usam header `token` com token da instancia.
 - Endpoints administrativos usam header `admintoken`.
 - O acesso administrativo lista instancias, mas nao deve ser usado pelo worker de envio.
-- `/instance/status` valida se a instancia esta conectada.
+- `/status` (com fallback para `/instance/status`) valida se a instancia esta conectada.
 - `/group/list` lista grupos da instancia.
 - `/group/info` recebe `groupjid` e retorna detalhes do grupo.
 - `/send/text` envia texto para telefone, usuario, canal ou grupo.

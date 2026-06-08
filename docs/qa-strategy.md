@@ -78,7 +78,7 @@ Foco: adapters, banco, fila e contratos com providers.
   - reprocessa falha transiente dentro do limite;
   - nao reprocessa bloqueio de compliance.
 - UAZAPI adapter:
-  - consulta `/instance/status`;
+  - consulta `/status` (com fallback para `/instance/status` quando disponível);
   - lista grupos;
   - valida JID allowlistado;
   - consulta `/group/info`;

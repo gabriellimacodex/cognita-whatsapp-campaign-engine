@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable } from "@nestjs/common";
+import {
+  BadRequestException,
+  HttpException,
+  HttpStatus,
+  Injectable
+} from "@nestjs/common";
 import {
   GroupProvider,
   GroupInstanceStatus,
@@ -13,6 +18,14 @@ const SEND_PATHS = [
   "/messages/send",
   "/group/send/text",
   "/group/send/message"
+];
+
+const INSTANCE_STATUS_PATHS = ["/status", "/instance/status"];
+const GROUP_LIST_PATHS = ["/group/list", "/groups/list", "/groups"];
+const GROUP_INFO_PATHS = [
+  "/group/info",
+  "/groups/info",
+  "/group/members"
 ];
 
 const TRACK_SOURCE_KEYS = ["track_source", "trackSource", "source"];
@@ -52,7 +65,9 @@ export class UazapiAdapterService implements GroupProvider {
     method?: "GET" | "POST";
     query?: Record<string, string>;
     body?: Record<string, unknown>;
+    requiresToken?: boolean;
   } = {}): Promise<T> {
+    const requiresToken = options.requiresToken ?? true;
     const queryParams = options.query
       ? new URLSearchParams(options.query)
       : undefined;
@@ -67,17 +82,21 @@ export class UazapiAdapterService implements GroupProvider {
       method: options.method ?? "GET",
       headers: {
         "Content-Type": "application/json",
-        Accept: "application/json",
-        token: this.instanceToken ?? ""
+        Accept: "application/json"
       }
     };
+    if (requiresToken) {
+      if (!this.instanceToken) {
+        throw new BadRequestException("UAZAPI instance token missing");
+      }
+      requestInit.headers = {
+        ...requestInit.headers,
+        token: this.instanceToken
+      };
+    }
 
     if (options.body) {
       requestInit.body = JSON.stringify(options.body);
-    }
-
-    if (!this.instanceToken) {
-      throw new BadRequestException("UAZAPI instance token missing");
     }
 
     const response = await fetch(url, requestInit);
@@ -90,13 +109,49 @@ export class UazapiAdapterService implements GroupProvider {
     }
 
     if (!response.ok) {
+      const status = response.status;
       const message =
         (payload && typeof payload === "object" && (payload as { message?: string }).message) ??
         `UAZAPI request failed ${response.status}`;
-      throw new Error(String(message));
+      if (status === HttpStatus.UNAUTHORIZED || status === HttpStatus.FORBIDDEN) {
+        throw new HttpException(String(message), status);
+      }
+      if (status >= HttpStatus.BAD_REQUEST && status < HttpStatus.INTERNAL_SERVER_ERROR) {
+        throw new BadRequestException(String(message));
+      }
+      throw new HttpException(String(message), HttpStatus.BAD_GATEWAY);
     }
 
     return payload as T;
+  }
+
+  private shouldRetryRequestForPath(status: number) {
+    return status === HttpStatus.NOT_FOUND || status === HttpStatus.METHOD_NOT_ALLOWED;
+  }
+
+  private async requestAnyPath<T>(
+    paths: string[],
+    options: {
+      method?: "GET" | "POST";
+      query?: Record<string, string>;
+      body?: Record<string, unknown>;
+      requiresToken?: boolean;
+    } = {}
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    for (const path of paths) {
+      try {
+        return this.unwrapData(await this.request<unknown>(path, options)) as T;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (error instanceof HttpException && this.shouldRetryRequestForPath(error.getStatus())) {
+          continue;
+        }
+        break;
+      }
+    }
+
+    throw lastError ?? new Error("UAZAPI request failed");
   }
 
   private unwrapData(payload: unknown): unknown {
@@ -159,27 +214,39 @@ export class UazapiAdapterService implements GroupProvider {
   }
 
   async getInstanceStatus(_accountId?: string): Promise<GroupInstanceStatus> {
-    const payload = this.unwrapData(await this.request<unknown>("/instance/status"));
+    const payload = await this.requestAnyPath<unknown>(INSTANCE_STATUS_PATHS, {
+      method: "GET",
+      requiresToken: false
+    });
+    const normalizedStatus = this.coerceObject(payload);
+    const candidateStatus = this.coerceObject(normalizedStatus?.status) ?? normalizedStatus;
+    const checkedInstance = this.coerceObject(candidateStatus?.checked_instance);
+
+    const connectedValue =
+      checkedInstance
+        ? this.boolFromUnknown(
+          checkedInstance.connected ??
+          checkedInstance.is_connected ??
+          checkedInstance.connection_status
+        ) ||
+          this.toString(checkedInstance.connection_status).toLowerCase() === "connected"
+        : this.boolFromUnknown(candidateStatus?.connected, false);
+
+    const loggedInValue =
+      this.boolFromUnknown(
+        checkedInstance?.loggedIn ??
+        checkedInstance?.is_logged_in ??
+        (candidateStatus && candidateStatus.loggedIn)
+      , true);
+
     const statusBag = this.toString(
-      (payload && typeof payload === "object" && (payload as Record<string, unknown>).status) ?? ""
+      checkedInstance?.connection_status ??
+      candidateStatus?.status ??
+      checkedInstance?.status ??
+      candidateStatus?.connectionStatus
     ).toLowerCase();
-    const connected =
-      this.boolFromUnknown(
-        payload &&
-          typeof payload === "object" &&
-          ((payload as Record<string, unknown>).connected || (payload as Record<string, unknown>).connected === false)
-          ? (payload as Record<string, unknown>).connected
-          : undefined
-      ) || statusBag === "connected";
-    const loggedIn =
-      this.boolFromUnknown(
-        payload &&
-          typeof payload === "object" &&
-          ((payload as Record<string, unknown>).loggedIn || (payload as Record<string, unknown>).loggedIn === false)
-          ? (payload as Record<string, unknown>).loggedIn
-          : undefined,
-        true
-      ) && connected;
+    const connected = connectedValue || checkedInstance?.is_healthy === true || statusBag === "connected";
+    const loggedIn = loggedInValue && connected;
 
     return {
       connected,
@@ -193,15 +260,20 @@ export class UazapiAdapterService implements GroupProvider {
               ? "connected"
               : "disconnected",
       reason: this.toString(
-        payload &&
-          typeof payload === "object" &&
-          (payload as Record<string, unknown>).reason
+        checkedInstance?.message ??
+        checkedInstance?.reason ??
+        candidateStatus?.reason ??
+        candidateStatus?.message ??
+        normalizedStatus?.message
       )
     };
   }
 
   async listGroups(_accountId?: string): Promise<GroupRemoteRecord[]> {
-    const payload = this.unwrapData(await this.request<unknown>("/group/list"));
+    const payload = await this.requestAnyPath<unknown>(GROUP_LIST_PATHS, {
+      method: "GET",
+      requiresToken: true
+    });
     if (!Array.isArray(payload)) {
       return [];
     }
@@ -318,24 +390,39 @@ export class UazapiAdapterService implements GroupProvider {
   }
 
   async getGroupInfo(groupJid: string): Promise<UazapiGroupInfo | null> {
-    const tryGet = async (query: "get" | "post"): Promise<unknown> => {
-      if (query === "get") {
-        return this.request<unknown>("/group/info", {
-          method: "GET",
-          query: { groupjid: groupJid }
-        });
-      }
-      return this.request<unknown>("/group/info", {
-        method: "POST",
-        body: { groupjid: groupJid }
-      });
-    };
+    const queryVariants: Array<{ query?: Record<string, string>; body?: Record<string, unknown>; method: "GET" | "POST" }> = [
+      { method: "GET", query: { groupjid: groupJid } },
+      { method: "GET", query: { groupId: groupJid } },
+      { method: "GET", query: { jid: groupJid } },
+      { method: "POST", body: { groupjid: groupJid } },
+      { method: "POST", body: { groupId: groupJid } },
+      { method: "POST", body: { jid: groupJid } }
+    ];
 
     let payload: unknown = null;
-    try {
-      payload = this.unwrapData(await tryGet("get"));
-    } catch {
-      payload = this.unwrapData(await tryGet("post"));
+    let lastError: Error | null = null;
+
+    for (const path of GROUP_INFO_PATHS) {
+      for (const variant of queryVariants) {
+        try {
+          payload = await this.requestAnyPath<unknown>([path], {
+            method: variant.method,
+            query: variant.query,
+            body: variant.body
+          });
+          break;
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+        }
+      }
+
+      if (payload) {
+        break;
+      }
+    }
+
+    if (!payload) {
+      throw lastError ?? new Error("Could not get group info from UAZAPI");
     }
 
     const candidate = this.coerceObject(payload);
