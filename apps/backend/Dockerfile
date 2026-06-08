@@ -7,7 +7,7 @@ COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml turbo.json tsconfig.base.j
 COPY apps/backend/package.json apps/backend/package.json
 COPY packages/domain/package.json packages/domain/package.json
 COPY packages/config/package.json packages/config/package.json
-RUN pnpm install --frozen-lockfile=false
+RUN pnpm install --recursive --frozen-lockfile=false
 
 FROM deps AS build
 COPY . .
@@ -25,4 +25,3 @@ COPY --from=build /app/packages/config/dist ./packages/config/dist
 COPY --from=build /app/packages/config/package.json ./packages/config/package.json
 EXPOSE 3001
 CMD ["node", "apps/backend/dist/main.js"]
-
