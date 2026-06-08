@@ -83,7 +83,7 @@ Foco: adapters, banco, fila e contratos com providers.
   - valida JID allowlistado;
   - consulta `/group/info`;
   - extrai participantes;
-  - envia texto para grupo teste/allowlistado;
+  - envia texto para grupo teste/allowlistado com fallback para `/sender/simple` quando necessário;
   - correlaciona `track_source` e `track_id` quando disponiveis.
 - Kapso/Capsule adapter:
   - lista templates;

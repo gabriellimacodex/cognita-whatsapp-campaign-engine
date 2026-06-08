@@ -20,6 +20,8 @@ const SEND_PATHS = [
   "/group/send/message"
 ];
 
+const SENDER_SIMPLE_PATH = "/sender/simple";
+
 const INSTANCE_STATUS_PATHS = ["/status", "/instance/status"];
 const GROUP_LIST_PATHS = ["/group/list", "/groups/list", "/groups"];
 const GROUP_INFO_PATHS = [
@@ -328,7 +330,20 @@ export class UazapiAdapterService implements GroupProvider {
       }
     ];
 
+    const delaySeconds = Math.max(1, Math.floor((input.delayMs ?? 2000) / 1000));
+    const delayJitter = delaySeconds + 1;
     let lastError: Error = new Error("Unable to send via UAZAPI");
+
+    const simplePayload = {
+      numbers: [groupJid],
+      type: "text",
+      delayMin: delaySeconds,
+      delayMax: delayJitter,
+      scheduled_for: Date.now(),
+      text,
+      folder: `uazapi-${input.accountId}-${this.normalizeForFolder(groupJid)}`
+    };
+
     for (const path of SEND_PATHS) {
       for (const payload of payloads) {
         try {
@@ -372,6 +387,23 @@ export class UazapiAdapterService implements GroupProvider {
       }
     }
 
+    try {
+      const response = await this.request<unknown>(SENDER_SIMPLE_PATH, {
+        method: "POST",
+        body: simplePayload
+      });
+      const normalized = this.unwrapData(response);
+      const record = normalized && typeof normalized === "object" ? normalized as Record<string, unknown> : {};
+      const status = this.toString(record.status).toLowerCase() || "accepted";
+      return {
+        providerMessageId: this.toString(record.folder_id || record.folder || record.id || record.batchId) || "sender-batch",
+        status: status.includes("sent") || status.includes("delivered") ? "sent" : "accepted",
+        raw: response
+      };
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+
     throw lastError;
   }
 
@@ -387,6 +419,10 @@ export class UazapiAdapterService implements GroupProvider {
       text,
       trackId
     });
+  }
+
+  private normalizeForFolder(value: string): string {
+    return value.replace(/[@.]/g, "-");
   }
 
   async getGroupInfo(groupJid: string): Promise<UazapiGroupInfo | null> {

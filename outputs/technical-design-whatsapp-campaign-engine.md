@@ -342,7 +342,8 @@ Contratos validados em auditoria:
 - `/status` (com fallback para `/instance/status`) valida se a instancia esta conectada.
 - `/group/list` lista grupos da instancia.
 - `/group/info` recebe `groupjid` e retorna detalhes do grupo.
-- `/send/text` envia texto para telefone, usuario, canal ou grupo.
+- `/send/text` envia texto para telefone, usuario, canal ou grupo (rota principal documentada).
+- `/sender/simple` é usado como rota de fallback operacional no runtime quando `/send/text` retorna incompatibilidade.
 - `/send/media` envia midia para telefone, usuario, canal ou grupo.
 - O campo `number` aceita JID de grupo no formato `@g.us`.
 - `/webhook` configura webhooks por instancia.
@@ -727,6 +728,7 @@ Cenario minimo:
 - O runtime de envio nao deve receber credencial administrativa.
 - O onboarding deve trocar credencial administrativa por uma instancia selecionada e armazenar apenas o token dessa instancia em secret manager.
 - O envio para grupos e tecnicamente suportado via `/send/text` e `/send/media`.
+- Em produção, o adapter usa também fallback para `/sender/simple` para manter compatibilidade com instâncias que não aceitam `/send/text`.
 - O identificador canonico do grupo deve ser o JID `@g.us`.
 - O webhook global nao estava configurado; o MVP deve configurar webhook por instancia.
 - A UI de grupo precisa mostrar estado da instancia antes de permitir agendamento.

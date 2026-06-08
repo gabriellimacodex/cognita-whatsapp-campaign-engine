@@ -93,13 +93,60 @@ class UazapiSender {
       }
     ];
 
-    const paths = ["/send/text", "/messages/send", "/group/send/text", "/group/send/message"];
+    const paths = ["/send/text", "/messages/send", "/group/send/text", "/group/send/message", "/sender/simple"];
+    const senderPayload = {
+      numbers: [input.groupJid],
+      type: "text",
+      delayMin: 1,
+      delayMax: 3,
+      scheduled_for: Date.now(),
+      text: input.text,
+      folder: `worker-${input.accountId}-${input.groupJid.replace(/[@.]/g, "-")}`
+    };
     const query = new URLSearchParams({ token: this.token });
 
     let lastError: unknown = new Error("uazapi send failed");
     for (const path of paths) {
       for (const payload of payloads) {
         try {
+          if (path === "/sender/simple") {
+            const response = await fetch(new URL(path + `?${query.toString()}`, this.baseUrl), {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Accept: "application/json",
+                token: this.token
+              },
+              body: JSON.stringify(senderPayload)
+            });
+
+            const raw = await response.text();
+            let responsePayload: unknown = null;
+            try {
+              responsePayload = raw ? JSON.parse(raw) : null;
+            } catch {
+              responsePayload = raw;
+            }
+
+            if (!response.ok) {
+              const message = this.readErrorFromPayload(responsePayload, `UAZAPI request failed ${response.status}`);
+              throw new Error(message);
+            }
+
+            const status = this.readString(this.extractValue(responsePayload, "status")).toLowerCase() || "accepted";
+            const providerMessageId = this.readString(
+              this.extractValue(responsePayload, "folder_id") ||
+              this.extractValue(responsePayload, "folder") ||
+              this.extractValue(responsePayload, "id")
+            ) || "sender-batch";
+
+            return {
+              providerMessageId,
+              status: status.includes("sent") || status.includes("delivered") ? "sent" : "accepted",
+              raw: responsePayload
+            };
+          }
+
           const response = await fetch(new URL(path + `?${query.toString()}`, this.baseUrl), {
             method: "POST",
             headers: {
@@ -182,6 +229,15 @@ class UazapiSender {
   }
 
   private readString(value: unknown) {
+    return typeof value === "string" ? value : "";
+  }
+
+  private extractValue(payload: unknown, key: string): string {
+    if (!payload || typeof payload !== "object") {
+      return "";
+    }
+    const candidate = payload as Record<string, unknown>;
+    const value = candidate[key];
     return typeof value === "string" ? value : "";
   }
 }

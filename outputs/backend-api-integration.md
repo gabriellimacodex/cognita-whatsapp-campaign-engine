@@ -142,8 +142,8 @@
 - `apps/backend/src/infrastructure/prisma/*`
   - Cliente Prisma no Nest (`PrismaService`) + módulo.
 
-- `apps/backend/src/infrastructure/uazapi/uazapi.adapter.ts`
-  - Adapter dos endpoints auditados da UAZAPI (`/status` com fallback para `/instance/status`, `/group/list`, `/group/info`, `/send/text`).
+  - `apps/backend/src/infrastructure/uazapi/uazapi.adapter.ts`
+  - Adapter dos endpoints auditados da UAZAPI (`/status` com fallback para `/instance/status`, `/group/list`, `/group/info`, tentativa de `/send/text` com fallback para `/sender/simple`).
 
 - `apps/backend/src/application/group/group-sync.service.ts`
   - Lógica de sincronização/extracao e persistência de contatos.
