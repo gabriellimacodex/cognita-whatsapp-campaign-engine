@@ -36,6 +36,25 @@ interface UazapiWebhookResult {
   eventsUpserted: number;
 }
 
+interface GroupExtractionPreviewContact {
+  phoneE164: string;
+  contactId: string | null;
+  displayName: string | null;
+  status: "would_create_consent" | "would_keep";
+  source: string;
+  existingConsentStatus: string | null;
+}
+
+export interface GroupExtractionPreviewResult {
+  preview: true;
+  groupJid: string;
+  groupName: string;
+  groupTargetId: string;
+  extractedMembers: number;
+  upsertedConsents: number;
+  extractedContacts: GroupExtractionPreviewContact[];
+}
+
 type GroupTargetRecord = {
   id: string;
   name: string;
@@ -288,29 +307,87 @@ export class GroupSyncService {
     });
   }
 
+  async previewGroupMembers(input: { groupJid?: string }): Promise<GroupExtractionPreviewResult> {
+    const { groupJid, target, groupInfo, normalizedParticipants } =
+      await this.getExtractionContext(input);
+
+    if (normalizedParticipants.length === 0) {
+      return {
+        preview: true,
+        groupJid,
+        groupName: groupInfo.name || target.name,
+        groupTargetId: target.id,
+        extractedMembers: 0,
+        upsertedConsents: 0,
+        extractedContacts: []
+      };
+    }
+
+    const dedupedParticipants = this.deduplicateByPhoneE164(normalizedParticipants);
+
+    const contacts = await this.prisma.contact.findMany({
+      where: {
+        phoneE164: {
+          in: dedupedParticipants.map((member) => member.phoneE164)
+        }
+      },
+      select: {
+        id: true,
+        phoneE164: true,
+        consents: {
+          orderBy: { updatedAt: "desc" },
+          take: 1,
+          select: {
+            status: true
+          }
+        }
+      }
+    }) as Array<{
+      id: string;
+      phoneE164: string;
+      consents: Array<{ status: string }>;
+    }>;
+
+    const contactsByPhone = new Map(contacts.map((contact) => [contact.phoneE164, contact]));
+
+    let upsertedConsents = 0;
+    const extractedContacts: GroupExtractionPreviewContact[] = dedupedParticipants.map((member) => {
+      const contact = contactsByPhone.get(member.phoneE164);
+      const latestConsent = contact?.consents?.[0] ?? null;
+      const latestStatus = latestConsent?.status ?? null;
+      const shouldCreateConsent = !latestConsent || latestStatus !== "group_member_discovered";
+      if (shouldCreateConsent) {
+        upsertedConsents += 1;
+      }
+
+      return {
+        phoneE164: member.phoneE164,
+        contactId: contact?.id ?? null,
+        displayName: member.displayName,
+        status: shouldCreateConsent ? "would_create_consent" : "would_keep",
+        source: shouldCreateConsent ? "group_member_discovered" : latestStatus ?? "group_member_discovered",
+        existingConsentStatus: latestStatus
+      };
+    });
+
+    return {
+      preview: true,
+      groupJid,
+      groupName: groupInfo.name || target.name,
+      groupTargetId: target.id,
+      extractedMembers: dedupedParticipants.length,
+      upsertedConsents,
+      extractedContacts
+    };
+  }
+
   async extractGroupMembers(input: { groupJid?: string }): Promise<GroupExtractionResult> {
-    const allowlistJid = this.config.env.UAZAPI_GROUP_ALLOWLIST_JID;
-    const requestedJid = input.groupJid?.trim();
-    if (requestedJid && requestedJid !== allowlistJid) {
-      throw new BadRequestException("Only allowlisted group can be extracted in MVP");
-    }
+    const { groupJid, target, groupInfo, normalizedParticipants: normalized } =
+      await this.getExtractionContext(input);
 
-    const groupJid = allowlistJid;
-    const instanceStatus = await this.uazapi.getInstanceStatus();
+    const deduped = this.deduplicateByPhoneE164(normalized);
 
-    if (!instanceStatus.connected || !instanceStatus.loggedIn) {
-      throw new BadRequestException("UAZAPI instance is not connected");
-    }
-
-    const target = await this.syncTargetGroup(groupJid);
-    const groupInfo = await this.uazapi.getGroupInfo(groupJid);
-
-    if (!groupInfo) {
-      throw new NotFoundException("Group not found in instance");
-    }
-
-    const normalized = this.normalizeParticipants(groupInfo, groupJid);
-    if (normalized.length === 0) {
+    if (deduped.length === 0) {
       return {
         groupJid,
         groupName: groupInfo.name || target.name,
@@ -326,7 +403,7 @@ export class GroupSyncService {
     const seen = new Set<string>();
 
     await this.prisma.$transaction(async (tx) => {
-      for (const member of normalized) {
+      for (const member of deduped) {
         if (seen.has(member.phoneE164)) {
           continue;
         }
@@ -421,10 +498,50 @@ export class GroupSyncService {
       groupJid,
       groupName: groupInfo.name || target.name,
       groupTargetId: target.id,
-      extractedMembers: normalized.length,
+      extractedMembers: deduped.length,
       upsertedConsents,
       extractedContacts
     };
+  }
+
+  private deduplicateByPhoneE164(participants: NormalizedGroupMember[]) {
+    const seen = new Set<string>();
+    const deduped: NormalizedGroupMember[] = [];
+
+    for (const participant of participants) {
+      if (seen.has(participant.phoneE164)) {
+        continue;
+      }
+      seen.add(participant.phoneE164);
+      deduped.push(participant);
+    }
+
+    return deduped;
+  }
+
+  private async getExtractionContext(input: { groupJid?: string }) {
+    const allowlistJid = this.config.env.UAZAPI_GROUP_ALLOWLIST_JID;
+    const requestedJid = input.groupJid?.trim();
+    if (requestedJid && requestedJid !== allowlistJid) {
+      throw new BadRequestException("Only allowlisted group can be extracted in MVP");
+    }
+
+    const groupJid = allowlistJid;
+    const instanceStatus = await this.uazapi.getInstanceStatus();
+
+    if (!instanceStatus.connected || !instanceStatus.loggedIn) {
+      throw new BadRequestException("UAZAPI instance is not connected");
+    }
+
+    const target = await this.syncTargetGroup(groupJid);
+    const groupInfo = await this.uazapi.getGroupInfo(groupJid);
+
+    if (!groupInfo) {
+      throw new NotFoundException("Group not found in instance");
+    }
+
+    const normalizedParticipants = this.normalizeParticipants(groupInfo, groupJid);
+    return { groupJid, target, groupInfo, normalizedParticipants };
   }
 
   private async syncTargetGroup(groupJid: string) {

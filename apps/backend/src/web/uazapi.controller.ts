@@ -1,7 +1,8 @@
 import { Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 import {
   GroupSyncService,
-  type GroupExtractionResult
+  type GroupExtractionResult,
+  type GroupExtractionPreviewResult
 } from "../application/group/group-sync.service.js";
 
 interface UazapiWebhookResponse {
@@ -43,6 +44,11 @@ export class UazapiController {
   @Post("groups/extract")
   async extractMembers(@Body() body: { groupJid?: string } = {}): Promise<GroupExtractionResult> {
     return this.groupSync.extractGroupMembers(body);
+  }
+
+  @Post("groups/extract/preview")
+  async previewExtractMembers(@Body() body: { groupJid?: string } = {}): Promise<GroupExtractionPreviewResult> {
+    return this.groupSync.previewGroupMembers(body);
   }
 
   @Post("webhook")
